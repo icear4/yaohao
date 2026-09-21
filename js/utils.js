@@ -52,6 +52,7 @@ function hash2(x, y) {
 
 /* 缓动 */
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
 function easeOutBack(t) {
   const c1 = 1.70158, c3 = c1 + 1;
   return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
@@ -81,4 +82,57 @@ function polygonPath(ctx, points) {
     if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
   }
   ctx.closePath();
+}
+
+/* ===========================================================
+   种子随机数系统
+   —— 地图 / 房间类型 / 敌人 / 道具 / 宝箱 使用 Rng（可复现）
+   —— 粒子、抖动等表现层随机继续用 Math.random，不影响复现性
+   =========================================================== */
+function hashSeed(str) {
+  let h = 2166136261 >>> 0;
+  str = String(str);
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+class Rng {
+  constructor(seed) {
+    const s = (typeof seed === 'number' ? seed : hashSeed(seed)) >>> 0;
+    this.s = s === 0 ? 1 : s;
+  }
+  /* mulberry32 */
+  next() {
+    this.s = (this.s + 0x6D2B79F5) >>> 0;
+    let t = this.s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  range(a, b) { return a + this.next() * (b - a); }
+  int(a, b) { return Math.floor(a + this.next() * (b - a + 1)); }   // 闭区间
+  pick(arr) { return arr[Math.floor(this.next() * arr.length)]; }
+  chance(p) { return this.next() < p; }
+  shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(this.next() * (i + 1));
+      const t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+  fork(salt) { return new Rng(hashSeed(this.s + '|' + String(salt))); }
+}
+
+const SEED_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function randomSeedString(len) {
+  len = len || 6;
+  let s = '';
+  for (let i = 0; i < len; i++) {
+    s += SEED_ALPHABET[Math.floor(Math.random() * SEED_ALPHABET.length)];
+  }
+  return s;
 }

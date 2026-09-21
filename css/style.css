@@ -53,10 +53,10 @@ body {
   pointer-events: none;
 }
 
-/* ---------- 全屏按钮 ---------- */
+/* ---------- 全屏按钮（右下角，避开右上小地图） ---------- */
 #fs-btn {
   position: absolute;
-  top: 14px;
+  bottom: 14px;
   right: 16px;
   pointer-events: auto;
   padding: 7px 14px;
@@ -155,8 +155,36 @@ body {
 .primary-btn:active { transform: translateY(1px); }
 
 .ov-hint {
-  margin-top: 20px;
+  margin-top: 16px;
   font-size: 11.5px;
   letter-spacing: 1px;
   color: #5d6f7e;
+}
+
+/* ---------- Seed 输入 ---------- */
+#seed-input {
+  display: block;
+  margin: 18px auto 0;
+  width: 220px;
+  padding: 9px 12px;
+  text-align: center;
+  font: 700 13px/1 "Segoe UI", system-ui, sans-serif;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #ffd28a;
+  background: rgba(8, 12, 18, 0.85);
+  border: 1px solid rgba(120, 190, 220, 0.28);
+  border-radius: 6px;
+  outline: none;
+  transition: border-color .18s, box-shadow .18s;
+}
+#seed-input::placeholder {
+  color: #56687a;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  text-transform: none;
+}
+#seed-input:focus {
+  border-color: rgba(255, 190, 100, 0.7);
+  box-shadow: 0 0 12px rgba(255, 170, 60, 0.22);
 }

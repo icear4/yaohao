@@ -1,0 +1,362 @@
+/* ===========================================================
+   props.js — 房间内的可交互物件
+   宝箱 / 异象祭坛 / 商栈基座 / 层间裂隙
+   全部原创，材质用 Canvas 绘制
+   =========================================================== */
+'use strict';
+
+class Prop {
+  constructor(game, x, y, opt) {
+    opt = opt || {};
+    this.game = game;
+    this.x = x;
+    this.y = y;
+    this.r = opt.r || 20;
+    this.used = false;
+    this.animT = Math.random() * 6;
+    this.label = opt.label || '交互';
+    this.hint = '';
+  }
+
+  update(dt) { this.animT += dt; }
+
+  inRange(player) {
+    return dist(this.x, this.y, player.x, player.y) < this.r + player.r + 26;
+  }
+
+  use() { if (this.used) return false; this.used = true; return true; }
+
+  /* 底座光环（所有物件共用） */
+  drawBase(ctx, color, alpha) {
+    const t = this.animT;
+    ctx.save();
+    ctx.globalAlpha = alpha === undefined ? 0.35 : alpha;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    const rr = this.r + 8 + Math.sin(t * 2) * 2.5;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, rr, 0, TAU);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* 头顶提示箭头 */
+  drawMarker(ctx, color) {
+    const t = this.animT;
+    const y = this.y - this.r - 20 + Math.sin(t * 3) * 3;
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.85;
+    polygonPath(ctx, [
+      [this.x, y + 10],
+      [this.x - 7, y - 2],
+      [this.x + 7, y - 2]
+    ]);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* -----------------------------------------------------------
+   宝箱（Treasure）
+   ----------------------------------------------------------- */
+class Chest extends Prop {
+  constructor(game, x, y, rng) {
+    super(game, x, y, { r: 22 });
+    this.rng = rng;
+    this.item = pickUpgrade(rng, game.ownedItems || []);
+    this.label = '开启宝箱';
+    this.openT = 0;
+  }
+
+  use() {
+    if (!super.use()) return false;
+    const p = this.game.player;
+    this.item.apply(p);
+    this.game.ownedItems.push(this.item.id);
+    this.game.addShake(3);
+    this.game.ui.showBanner(this.item.name, this.item.desc, 2.2);
+    this.game.damageNumbers.add(this.x, this.y - 30, this.item.name, {
+      color: this.item.color, life: 1.3, vy: -40
+    });
+    this.game.particles.burst(this.x, this.y, 24, {
+      speed: 200, life: 0.8, size: 5,
+      colors: [this.item.color, '#ffffff', '#ffd35e']
+    });
+    this.game.particles.ring(this.x, this.y, this.item.color, 18, 180);
+    return true;
+  }
+
+  update(dt) {
+    super.update(dt);
+    if (this.used && this.openT < 1) this.openT = Math.min(1, this.openT + dt * 3);
+  }
+
+  draw(ctx) {
+    const t = this.animT;
+    const open = this.openT;
+    this.drawBase(ctx, this.used ? '#5d6f7e' : '#ffd35e', 0.35);
+    if (!this.used) this.drawMarker(ctx, '#ffd35e');
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    const bob = this.used ? 0 : Math.sin(t * 2.2) * 2;
+    ctx.translate(0, bob);
+
+    /* 箱体 */
+    ctx.fillStyle = '#3a2a18';
+    roundRectPath(ctx, -20, -10, 40, 22, 4);
+    ctx.fill();
+    ctx.strokeStyle = '#7a5a2a';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    /* 箱盖（开启时抬起） */
+    ctx.save();
+    ctx.translate(0, -10 - open * 12);
+    ctx.rotate(-open * 0.7);
+    ctx.fillStyle = '#4a3520';
+    roundRectPath(ctx, -21, -14, 42, 16, 6);
+    ctx.fill();
+    ctx.strokeStyle = '#8a6a32';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+
+    /* 锁扣 / 内部光 */
+    if (!this.used) {
+      ctx.fillStyle = '#ffd35e';
+      roundRectPath(ctx, -4, -4, 8, 8, 2);
+      ctx.fill();
+      ctx.globalAlpha = 0.25 + 0.15 * Math.sin(t * 4);
+      ctx.fillStyle = '#ffd35e';
+      ctx.beginPath();
+      ctx.arc(0, 0, 26, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = '#ffd35e';
+      ctx.beginPath();
+      ctx.arc(0, -6, 10, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+}
+
+/* -----------------------------------------------------------
+   异象祭坛（Event）—— 随机正负效果
+   ----------------------------------------------------------- */
+class Shrine extends Prop {
+  constructor(game, x, y, rng) {
+    super(game, x, y, { r: 24 });
+    this.rng = rng;
+    this.label = '触碰异象';
+    this.outcome = this._roll();
+  }
+
+  _roll() {
+    const rng = this.rng;
+    const roll = rng.next();
+    if (roll < 0.30) return { id: 'heal', name: '回响恩泽', desc: '生命完全回复', color: '#7dffb0' };
+    if (roll < 0.55) return { id: 'power', name: '残响灌注', desc: '攻击力 +5，最大生命 -8', color: '#ff8a5c' };
+    if (roll < 0.78) return { id: 'ember', name: '余烬涌流', desc: '获得 14 余烬', color: '#ffd35e' };
+    return { id: 'risk', name: '裂焰契约', desc: '当前生命 -18，暴击率 +15%', color: '#c08bff' };
+  }
+
+  use() {
+    if (!super.use()) return false;
+    const p = this.game.player;
+    const o = this.outcome;
+    if (o.id === 'heal') p.hp = p.maxHp;
+    else if (o.id === 'power') { p.damage += 5; p.maxHp = Math.max(30, p.maxHp - 8); p.hp = Math.min(p.hp, p.maxHp); }
+    else if (o.id === 'ember') this.game.embers += 14;
+    else if (o.id === 'risk') { p.critChance = Math.min(0.7, p.critChance + 0.15); p.takeDamage(18, this.x, this.y + 60); p.invuln = 0; }
+
+    this.game.ui.showBanner(o.name, o.desc, 2.2);
+    this.game.damageNumbers.add(this.x, this.y - 32, o.name, { color: o.color, life: 1.3, vy: -40 });
+    this.game.particles.ring(this.x, this.y, o.color, 20, 200);
+    this.game.addShake(3);
+    return true;
+  }
+
+  update(dt) { super.update(dt); }
+
+  draw(ctx) {
+    const t = this.animT;
+    const col = this.used ? '#5d6f7e' : this.outcome.color;
+    this.drawBase(ctx, col, 0.3);
+    if (!this.used) this.drawMarker(ctx, col);
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+
+    /* 三根立柱 */
+    ctx.strokeStyle = '#2c3446';
+    ctx.lineWidth = 5;
+    for (let i = 0; i < 3; i++) {
+      const a = t * 0.5 + (i / 3) * TAU;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * 16, Math.sin(a) * 8);
+      ctx.lineTo(Math.cos(a) * 16, Math.sin(a) * 8 - 26);
+      ctx.stroke();
+    }
+
+    /* 悬浮晶体 */
+    const fy = -34 + Math.sin(t * 2) * 3;
+    ctx.save();
+    ctx.translate(0, fy);
+    ctx.rotate(t * 0.8);
+    ctx.fillStyle = col;
+    ctx.globalAlpha = this.used ? 0.35 : 0.9;
+    polygonPath(ctx, [[0, -11], [8, 0], [0, 11], [-8, 0]]);
+    ctx.fill();
+    ctx.globalAlpha = 0.3;
+    ctx.beginPath();
+    ctx.arc(0, 0, 18, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.restore();
+  }
+}
+
+/* -----------------------------------------------------------
+   商栈基座（Shop）—— 消耗余烬换取强化
+   ----------------------------------------------------------- */
+class Pedestal extends Prop {
+  constructor(game, x, y, rng, cost) {
+    super(game, x, y, { r: 20 });
+    this.rng = rng;
+    this.cost = cost;
+    this.item = pickUpgrade(rng, game.ownedItems || []);
+    this.label = `购买 ${cost} 余烬`;
+    this.denyT = 0;
+  }
+
+  canAfford() { return this.game.embers >= this.cost; }
+
+  use() {
+    if (this.used) return false;
+    if (!this.canAfford()) {
+      this.denyT = 0.6;
+      this.game.damageNumbers.add(this.x, this.y - 28, '余烬不足', { color: '#ff7a7a', life: 0.9 });
+      return false;
+    }
+    this.used = true;
+    this.game.embers -= this.cost;
+    this.item.apply(this.game.player);
+    this.game.ownedItems.push(this.item.id);
+    this.game.ui.showBanner(this.item.name, this.item.desc, 2.2);
+    this.game.damageNumbers.add(this.x, this.y - 30, this.item.name, {
+      color: this.item.color, life: 1.3, vy: -40
+    });
+    this.game.particles.burst(this.x, this.y, 20, {
+      speed: 180, life: 0.7, size: 4, colors: [this.item.color, '#ffffff', '#7fe4ff']
+    });
+    return true;
+  }
+
+  update(dt) {
+    super.update(dt);
+    if (this.denyT > 0) this.denyT -= dt;
+  }
+
+  draw(ctx) {
+    const t = this.animT;
+    const col = this.used ? '#4a5a66' : (this.canAfford() ? this.item.color : '#7a6a5a');
+    this.drawBase(ctx, this.canAfford() && !this.used ? col : '#5d6f7e', 0.32);
+    if (!this.used) this.drawMarker(ctx, col);
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+
+    /* 基座 */
+    ctx.fillStyle = '#1d2531';
+    roundRectPath(ctx, -18, 0, 36, 14, 3);
+    ctx.fill();
+    ctx.strokeStyle = '#3c4a5e';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#161d27';
+    roundRectPath(ctx, -12, -22, 24, 24, 3);
+    ctx.fill();
+    ctx.stroke();
+
+    /* 商品 */
+    if (!this.used) {
+      const fy = -32 + Math.sin(t * 2.4) * 2.5;
+      ctx.save();
+      ctx.translate(0, fy);
+      ctx.rotate(t * 0.9);
+      ctx.fillStyle = this.item.color;
+      ctx.globalAlpha = this.canAfford() ? 1 : 0.45;
+      polygonPath(ctx, [[0, -9], [7, 0], [0, 9], [-7, 0]]);
+      ctx.fill();
+      ctx.restore();
+
+      /* 价格 */
+      ctx.globalAlpha = 1;
+      ctx.font = '800 13px "Segoe UI", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = this.canAfford() ? '#ffd35e' : '#ff7a7a';
+      ctx.fillText('◈' + this.cost, 0, 26);
+    } else {
+      ctx.globalAlpha = 0.4;
+      ctx.fillStyle = '#5d6f7e';
+      ctx.beginPath(); ctx.arc(0, -18, 8, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+}
+
+/* -----------------------------------------------------------
+   层间裂隙（Boss 房通关后出现）
+   ----------------------------------------------------------- */
+class Portal extends Prop {
+  constructor(game, x, y) {
+    super(game, x, y, { r: 30 });
+    this.label = '进入下一层';
+  }
+
+  use() {
+    if (!super.use()) return false;
+    this.game.particles.burst(this.x, this.y, 40, {
+      speed: 300, life: 1.0, size: 5, colors: ['#ffd35e', '#ff8a5c', '#ffffff', '#7fe4ff']
+    });
+    this.game.nextFloor();
+    return true;
+  }
+
+  draw(ctx) {
+    const t = this.animT;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+
+    /* 外圈旋转符环 */
+    ctx.strokeStyle = 'rgba(255,200,110,0.55)';
+    ctx.lineWidth = 2.5;
+    for (let i = 0; i < 3; i++) {
+      const a0 = t * (0.8 + i * 0.4) + (i / 3) * TAU;
+      ctx.beginPath();
+      ctx.arc(0, 0, 30 + i * 9, a0, a0 + Math.PI * 1.2);
+      ctx.stroke();
+    }
+
+    /* 裂隙核心 */
+    const g = ctx.createRadialGradient(0, 0, 2, 0, 0, 34);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.35, '#ffd35e');
+    g.addColorStop(1, 'rgba(255,140,60,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, 34 + Math.sin(t * 3) * 3, 0, TAU);
+    ctx.fill();
+
+    ctx.restore();
+    this.drawBase(ctx, '#ffd35e', 0.4);
+  }
+}
