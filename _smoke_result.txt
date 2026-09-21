@@ -1,0 +1,21 @@
+PASS | 构造 Game
+PASS | 开局进入 playing | playing
+PASS | WASD 移动生效 | dx=131.0
+PASS | 战斗期间门关闭
+PASS | 敌人生成 | n=3
+PASS | 可以射击 | shots=6
+PASS | 产生过投射物/命中
+PASS | 敌人能对玩家造成伤害 | hp=100 kills=3
+PASS | 房间可以被清空 | frames=0 kills=3
+PASS | 清空后门打开
+PASS | 清空后无敌人
+PASS | 走进门洞推进房间 | room=2
+PASS | 新房间重新锁门
+PASS | 三种敌人都会出现 | charger,chaser,shooter
+PASS | 可以暂停
+PASS | 可以继续
+PASS | 玩家死亡进入 gameover
+PASS | 可以重新开始
+PASS | 3600 帧无异常 | 平均 0.072 ms/帧 (逻辑+绘制调用)
+PASS | 粒子数量受控 | n=10
+PASS | 投射物未泄漏 | n=5
