@@ -30,6 +30,15 @@
       });
     }
 
+    /* 画面闪烁强度：关 / 弱 / 中 / 强（会记住选择） */
+    const flashBtn = document.getElementById('flash-btn');
+    if (flashBtn) {
+      flashBtn.addEventListener('click', () => {
+        game.cycleFlash();
+        flashBtn.blur();
+      });
+    }
+
     /* 竖屏提示：可以关掉，关掉后不再弹出 */
     const rhBtn = document.getElementById('rh-btn');
     if (rhBtn) {

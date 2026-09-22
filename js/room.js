@@ -352,14 +352,27 @@ class Room {
       for (const e of this.enemies) {
         if (dist(x, y, e.x, e.y) < radius + e.r + 14) { ok = false; break; }
       }
+      /* 不要生在实心环境障碍（石柱 / 齿轮 / 相位柱）里：
+         障碍会吃掉子弹，生在里面的敌人会变得极难命中 */
+      if (ok && this.hazards && this.hazards.hitTest && this.hazards.hitTest(x, y, radius + 8)) continue;
       if (ok) return { x: x, y: y };
     }
+    /* 兜底：绕着场地中心找一个不撞障碍的落点 */
     const cx = ARENA.x + ARENA.w / 2, cy = ARENA.y + ARENA.h / 2;
     const sx = rng.chance(0.5) ? -1 : 1, sy = rng.chance(0.5) ? -1 : 1;
-    return {
+    const base = {
       x: clamp(cx + sx * ARENA.w * 0.36, ARENA.x + 50, ARENA.x + ARENA.w - 50),
       y: clamp(cy + sy * ARENA.h * 0.36, ARENA.y + 50, ARENA.y + ARENA.h - 50)
     };
+    if (!(this.hazards && this.hazards.hitTest)) return base;
+    for (let i = 0; i < 24; i++) {
+      const ang = (i / 24) * Math.PI * 2;
+      const rr = 120 + (i % 3) * 80;
+      const nx = clamp(cx + Math.cos(ang) * rr, ARENA.x + 50, ARENA.x + ARENA.w - 50);
+      const ny = clamp(cy + Math.sin(ang) * rr, ARENA.y + 50, ARENA.y + ARENA.h - 50);
+      if (!this.hazards.hitTest(nx, ny, radius + 8)) return { x: nx, y: ny };
+    }
+    return base;
   }
 
   _spawnEnemy(type) {
@@ -532,6 +545,13 @@ class Room {
     const hit = Collision.resolveAll(e, walls);
     /* 环境障碍：实体化的柱子 / 齿轮 / 相位柱也会挡住去路 */
     if (this.hazards && this.hazards.resolveEntity) this.hazards.resolveEntity(e);
+    /* 兜底：墙体解算只在「贴着墙」时生效。若极端情况（强击退 / 障碍位移 / 传送）
+       把实体甩到墙外更远处，它会永远卡在外面看不到也打不到 —— 这里拉回竞技场 */
+    const r = e.r || 0;
+    if (e.x < -r || e.x > VIEW_W + r || e.y < -r || e.y > VIEW_H + r) {
+      e.x = clamp(e.x, ARENA.x + r, ARENA.x + ARENA.w - r);
+      e.y = clamp(e.y, ARENA.y + r, ARENA.y + ARENA.h - r);
+    }
     return hit;
   }
 

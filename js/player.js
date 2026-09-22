@@ -565,9 +565,11 @@ class Player {
     ctx.fill();
     ctx.restore();
 
-    /* 受击：红闪 + 白闪叠加（先白后红，一瞬间看清"挨打了"） */
+    /* 受击：红闪 + 白闪叠加（先白后红，一瞬间看清"挨打了"）
+       亮度跟随「画面闪烁」档位（关掉也保留 35%） */
     if (this.hurtFlash > 0) {
-      const hf = this.hurtFlash;
+      const hfm = (this.game && this.game.hitFlashMul !== undefined) ? this.game.hitFlashMul : 1;
+      const hf = this.hurtFlash * hfm;
       ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = hf * 0.75;
       ctx.fillStyle = '#ffffff';

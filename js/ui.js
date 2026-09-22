@@ -26,9 +26,10 @@ class UI {
     this.elHint = document.getElementById('ov-hint');
     this.elSeed = document.getElementById('seed-input');
     this.elShakeBtn = document.getElementById('shake-btn');
+    this.elFlashBtn = document.getElementById('flash-btn');
     this.elActions = document.getElementById('ov-actions');
     this.elPanel = (document.querySelector ? document.querySelector('.panel') : null);
-    this.refreshShakeBtn();
+    this.refreshFxBtns();
 
     this.elBtn.addEventListener('click', () => {
       this.game.primaryAction();
@@ -152,10 +153,15 @@ class UI {
     return null;
   }
 
-  /* HUD 上的「抖动强度」按钮文案 */
+  /* HUD 上的「抖动 / 闪烁」按钮文案 */
+  refreshFxBtns() { this.refreshShakeBtn(); this.refreshFlashBtn(); }
   refreshShakeBtn() {
     if (!this.elShakeBtn) return;
     this.elShakeBtn.textContent = '抖动 · ' + this.game.shakeLabel();
+  }
+  refreshFlashBtn() {
+    if (!this.elFlashBtn) return;
+    this.elFlashBtn.textContent = '闪烁 · ' + this.game.flashLabel();
   }
 
   /* 玩家当前 Build 的一句话摘要（遮罩面板用） */
@@ -623,15 +629,21 @@ class UI {
     const g = this.game;
     const ratio = clamp(p.hp / p.maxHp, 0, 1);
     if (this.hitVignette > 0) {
-      const a = this.hitVignette * 0.45;
-      const vg = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.28, VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.78);
-      vg.addColorStop(0, 'rgba(255,40,40,0)');
-      vg.addColorStop(1, `rgba(255,40,40,${a})`);
-      ctx.fillStyle = vg;
-      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+      /* 受击红晕也算闪烁，跟着「画面闪烁」档位一起缩放 */
+      const fm = (g.flashScale === undefined ? 1 : g.flashScale);
+      const a = this.hitVignette * 0.45 * fm;
+      if (a > 0.004) {
+        const vg = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.28, VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.78);
+        vg.addColorStop(0, 'rgba(255,40,40,0)');
+        vg.addColorStop(1, `rgba(255,40,40,${a})`);
+        ctx.fillStyle = vg;
+        ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+      }
     }
     if (p.hp > 0 && ratio < 0.3) {
-      const pulse = 0.10 + 0.08 * Math.sin(g.time * 6);
+      /* 低血量脉动是生存提示：关掉闪烁时也保留 35%，不至于完全看不见 */
+      const lm = (g.hitFlashMul === undefined ? 1 : g.hitFlashMul);
+      const pulse = (0.10 + 0.08 * Math.sin(g.time * 6)) * lm;
       const vg = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.3, VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.8);
       vg.addColorStop(0, 'rgba(255,0,0,0)');
       vg.addColorStop(1, `rgba(255,0,0,${pulse})`);

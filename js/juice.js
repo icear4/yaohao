@@ -154,9 +154,11 @@ const Juice = {
     });
   },
 
-  /* 全屏闪色（受伤 / 暴击 / 清怪 / 通关） */
+  /* 全屏闪色（受伤 / 暴击 / 清怪 / 通关）
+     档位关掉时直接不入队，省掉无意义的绘制 */
   flash(game, color, alpha, dur) {
     if (!game || !game.fx) return;
+    if (game.flashScale <= 0) return;
     game.fx.push({ type: 'flash', color: color, a0: alpha, life: dur || 0.16, max: dur || 0.16 });
   },
 

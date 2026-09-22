@@ -10,7 +10,7 @@ class Game {
     this.ctx = canvas.getContext('2d');
     this.dpr = 1;
 
-    /* 屏幕抖动强度档位（可在 HUD 按钮上循环切换，写入 localStorage 记住）
+    /* 屏幕抖动 / 画面闪烁 强度档位（HUD 按钮循环切换，写入 localStorage 记住）
        必须在 new UI 之前初始化：UI 构造时会读它来渲染按钮文案 */
     this.shakeLevels = [
       { name: '关', scale: 0 },
@@ -20,7 +20,18 @@ class Game {
     ];
     this.shakeLevel = 1;               // 默认「弱」
     this.shakeScale = this.shakeLevels[1].scale;
-    this._loadShakePref();
+
+    /* 画面闪烁：全屏闪色（受伤 / 暴击 / 清怪 / Boss 陨落）与受击红晕统一缩放
+       实体受击白闪单独走 hitFlashMul（关掉也保留一点，保证还能看清打没打中） */
+    this.flashLevels = [
+      { name: '关', scale: 0 },
+      { name: '弱', scale: 0.35 },
+      { name: '中', scale: 0.7 },
+      { name: '强', scale: 1 }
+    ];
+    this.flashLevel = 1;               // 默认「弱」
+    this._applyFlashLevel();
+    this._loadFxPrefs();
 
     this.input = new Input(canvas);
     this.ui = new UI(this);
@@ -890,13 +901,15 @@ class Game {
     }
   }
 
-  /* 全屏闪色：画在世界之上、UI 之下 */
+  /* 全屏闪色：画在世界之上、UI 之下（强度受「画面闪烁」档位缩放） */
   _drawFlashes(ctx) {
+    const mul = this.flashScale;
+    if (!(mul > 0)) return;
     for (const f of this.fx) {
       if (f.type !== 'flash') continue;
       const a = clamp(f.life / f.max, 0, 1);
       ctx.save();
-      ctx.globalAlpha = f.a0 * a;
+      ctx.globalAlpha = f.a0 * a * mul;
       ctx.fillStyle = f.color;
       ctx.fillRect(0, 0, VIEW_W, VIEW_H);
       ctx.restore();
@@ -1074,8 +1087,8 @@ class Game {
   cycleShake() {
     this.shakeLevel = (this.shakeLevel + 1) % this.shakeLevels.length;
     this.shakeScale = this.shakeLevels[this.shakeLevel].scale;
-    this._saveShakePref();
-    if (this.ui && this.ui.refreshShakeBtn) this.ui.refreshShakeBtn();
+    this._saveFxPrefs();
+    if (this.ui && this.ui.refreshFxBtns) this.ui.refreshFxBtns();
     if (this.ui && this.ui.showBanner) {
       this.ui.showBanner('屏幕抖动 · ' + this.shakeLevels[this.shakeLevel].name, '', 1.1);
     }
@@ -1086,25 +1099,62 @@ class Game {
     return this.shakeLevels[this.shakeLevel].name;
   }
 
-  _loadShakePref() {
-    let raw = null;
-    /* 优先读 Meta 存档里的设置；没有则兼容旧的独立键（读一次后迁移进 Meta） */
-    if (typeof Meta !== 'undefined') raw = Meta.getSetting('shake', null);
-    if (raw === null || raw === undefined) {
-      try { if (typeof localStorage !== 'undefined') raw = localStorage.getItem('echoRiftShake'); }
-      catch (e) { raw = null; }
-    }
-    const n = parseInt(raw, 10);
-    if (!isNaN(n) && n >= 0 && n < this.shakeLevels.length) {
-      this.shakeLevel = n;
-      this.shakeScale = this.shakeLevels[n].scale;
-    }
-    if (typeof Meta !== 'undefined') Meta.setSetting('shake', this.shakeLevel);
+  /* ---------------------------------------------------------
+     画面闪烁：关 / 弱 / 中 / 强（会记住选择）
+     --------------------------------------------------------- */
+  _applyFlashLevel() {
+    this.flashScale = this.flashLevels[this.flashLevel].scale;
+    /* 实体受击白闪：即使关掉全屏闪，也留 35% 保证"打中了"这件事还看得见 */
+    this.hitFlashMul = 0.35 + 0.65 * this.flashScale;
   }
 
-  _saveShakePref() {
+  cycleFlash() {
+    this.flashLevel = (this.flashLevel + 1) % this.flashLevels.length;
+    this._applyFlashLevel();
+    this._saveFxPrefs();
+    if (this.ui && this.ui.refreshFxBtns) this.ui.refreshFxBtns();
+    if (this.ui && this.ui.showBanner) {
+      this.ui.showBanner('画面闪烁 · ' + this.flashLevels[this.flashLevel].name, '', 1.1);
+    }
+    return this.flashLevels[this.flashLevel].name;
+  }
+
+  flashLabel() {
+    return this.flashLevels[this.flashLevel].name;
+  }
+
+  _loadFxPrefs() {
+    /* 抖动：优先读 Meta 存档，兼容旧的独立键（读一次后迁移进 Meta） */
+    let rawShake = null;
+    if (typeof Meta !== 'undefined') rawShake = Meta.getSetting('shake', null);
+    if (rawShake === null || rawShake === undefined) {
+      try { if (typeof localStorage !== 'undefined') rawShake = localStorage.getItem('echoRiftShake'); }
+      catch (e) { rawShake = null; }
+    }
+    const ns = parseInt(rawShake, 10);
+    if (!isNaN(ns) && ns >= 0 && ns < this.shakeLevels.length) {
+      this.shakeLevel = ns;
+      this.shakeScale = this.shakeLevels[ns].scale;
+    }
+
+    /* 闪烁 */
+    const rawFlash = (typeof Meta !== 'undefined') ? Meta.getSetting('flash', null) : null;
+    const nf = parseInt(rawFlash, 10);
+    if (!isNaN(nf) && nf >= 0 && nf < this.flashLevels.length) this.flashLevel = nf;
+    this._applyFlashLevel();
+
+    if (typeof Meta !== 'undefined') {
+      Meta.setSetting('shake', this.shakeLevel);
+      Meta.setSetting('flash', this.flashLevel);
+    }
+  }
+
+  _saveFxPrefs() {
     /* 统一写进 Meta 存档（含 localStorage 落盘） */
-    if (typeof Meta !== 'undefined') Meta.setSetting('shake', this.shakeLevel);
+    if (typeof Meta !== 'undefined') {
+      Meta.setSetting('shake', this.shakeLevel);
+      Meta.setSetting('flash', this.flashLevel);
+    }
   }
 
   /* ---------------------------------------------------------

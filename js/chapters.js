@@ -702,7 +702,8 @@ class PillarHazard extends EnvHazard {
       }
     }
     if (this.hitFlash > 0) {
-      ctx.globalAlpha = this.hitFlash * 0.6;
+      const hfm = (this.game && this.game.hitFlashMul !== undefined) ? this.game.hitFlashMul : 1;
+      ctx.globalAlpha = this.hitFlash * 0.6 * hfm;
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
       ctx.arc(0, 0, this.r * 1.05, 0, TAU);

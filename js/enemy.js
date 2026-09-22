@@ -448,9 +448,11 @@ class Enemy {
       ctx.restore();
     }
 
-    /* 受击白闪：叠加式高光，命中瞬间最亮，快速衰减 */
+    /* 受击白闪：叠加式高光，命中瞬间最亮，快速衰减
+       亮度跟随「画面闪烁」档位（关掉也保留 35%，还能看清打没打中） */
     if (this.hitFlash > 0) {
-      const hf = this.hitFlash;
+      const hfm = (this.game && this.game.hitFlashMul !== undefined) ? this.game.hitFlashMul : 1;
+      const hf = this.hitFlash * hfm;
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = hf * 0.85;
