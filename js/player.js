@@ -75,17 +75,14 @@ class Player {
   update(dt, input) {
     if (this.dead) return;
 
-    /* 移动 */
-    let mx = 0, my = 0;
-    if (input.isDown('KeyW') || input.isDown('ArrowUp')) my -= 1;
-    if (input.isDown('KeyS') || input.isDown('ArrowDown')) my += 1;
-    if (input.isDown('KeyA') || input.isDown('ArrowLeft')) mx -= 1;
-    if (input.isDown('KeyD') || input.isDown('ArrowRight')) mx += 1;
+    /* 移动（键盘 WASD/方向键 与 触屏虚拟摇杆统一走 Input.moveVector） */
+    const v = input.moveVector();
+    let mx = v.x, my = v.y;
+    const vlen = Math.hypot(mx, my);
 
-    this.moving = (mx !== 0 || my !== 0);
+    this.moving = vlen > 0.001;
     if (this.moving) {
-      const len = Math.hypot(mx, my);
-      mx /= len; my /= len;
+      if (vlen > 1) { mx /= vlen; my /= vlen; }
       const sp = this.moveSpeed;
       this.x += mx * sp * dt;
       this.y += my * sp * dt;
@@ -126,7 +123,7 @@ class Player {
     /* 射击 */
     this.fireTimer -= dt;
     this.recoil = Math.max(0, this.recoil - dt * 9);
-    if (input.mouse.down && this.fireTimer <= 0) {
+    if (input.firing() && this.fireTimer <= 0) {
       this.shoot();
       this.fireTimer = this.fireInterval;
     }

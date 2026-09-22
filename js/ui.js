@@ -60,7 +60,8 @@ class UI {
         '徘徊其中的，是回声凝成的残形。<br><br>' +
         '你是最后的拾火者，收集余烬，走到守望者面前。';
       this.elBtn.textContent = '开始探索';
-      this.elHint.textContent = 'WASD 移动 · 鼠标瞄准 · 左键射击 · E 交互 · ESC 暂停 · F 全屏';
+      const kbHint = 'WASD 移动 · 鼠标瞄准 · 左键射击 · E 交互 · ESC 暂停 · F 全屏';
+      this.elHint.textContent = (this.game.touchMode && this.touchHint) ? this.touchHint : kbHint;
       if (this.elSeed) this.elSeed.style.display = '';
     } else if (mode === 'pause') {
       this.elKicker.textContent = 'SYSTEM HALT';
@@ -211,7 +212,7 @@ class UI {
 
     /* ---- 交互提示 ---- */
     if (g.nearProp && !g.nearProp.used) {
-      const txt = 'E · ' + g.nearProp.label;
+      const txt = (g.touchMode ? '' : 'E · ') + g.nearProp.label;
       ctx.textAlign = 'center';
       ctx.font = '700 14px "Segoe UI", "PingFang SC", system-ui, sans-serif';
       const w = ctx.measureText(txt).width + 26;
@@ -232,7 +233,10 @@ class UI {
       ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
       ctx.fillStyle = '#6d8296';
       ctx.textAlign = 'center';
-      ctx.fillText('WASD 移动　·　鼠标瞄准　·　左键射击　·　E 交互　·　ESC 暂停　·　F 全屏', VIEW_W / 2, VIEW_H - 22);
+      const hint = g.touchMode
+        ? '拖动屏幕两侧即可移动与射击'
+        : 'WASD 移动　·　鼠标瞄准　·　左键射击　·　E 交互　·　ESC 暂停　·　F 全屏';
+      ctx.fillText(hint, VIEW_W / 2, VIEW_H - 22);
       ctx.textAlign = 'left';
       ctx.globalAlpha = 1;
     }
@@ -594,5 +598,40 @@ class UI {
     ctx.arc(0, 0, 1.8, 0, TAU);
     ctx.fill();
     ctx.restore();
+  }
+
+  /* ---------------------------------------------------------
+     触屏层：虚拟摇杆 + 屏幕按钮
+     --------------------------------------------------------- */
+  drawTouchControls(ctx) {
+    const t = this.game.input && this.game.input.touch;
+    if (t) t.draw(ctx);
+
+    const btns = this.game.touchButtons ? this.game.touchButtons() : [];
+    for (let i = 0; i < btns.length; i++) {
+      const b = btns[i];
+      ctx.save();
+      ctx.fillStyle = 'rgba(8,14,20,0.62)';
+      roundRectPath(ctx, b.x, b.y, b.w, b.h, 10);
+      ctx.fill();
+      ctx.strokeStyle = (b.id === 'act') ? 'rgba(255,200,110,0.6)' : 'rgba(120,190,220,0.45)';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+
+      ctx.fillStyle = (b.id === 'act') ? '#ffd28a' : '#9fe4f5';
+      ctx.font = '700 16px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(b.label || '', b.x + b.w / 2, b.y + b.h / 2 + 1);
+      ctx.restore();
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  /* 切到触屏模式时替换操作提示文案 */
+  setTouchHint() {
+    this.touchHint = '左半屏拖动移动　·　右半屏拖动瞄准并射击　·　按钮交互 / 暂停';
+    if (this.elHint) this.elHint.textContent = this.touchHint;
   }
 }

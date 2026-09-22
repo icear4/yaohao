@@ -2,7 +2,10 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#05070c">
 <title>残响回廊 · ECHO RIFT</title>
 <style>
 /* ===========================================================
@@ -15,6 +18,8 @@
 html, body {
   margin: 0;
   padding: 0;
+  position: fixed;
+  inset: 0;
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -23,6 +28,10 @@ html, body {
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;             /* 禁掉移动端滑动/缩放手势 */
+  overscroll-behavior: none;
 }
 
 body {
@@ -34,9 +43,14 @@ body {
 }
 
 #stage {
-  position: relative;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin-left: -640px;
+  margin-top: -360px;
   width: 1280px;
   height: 720px;
+  transform-origin: 50% 50%;      /* 由 JS 设置 scale，永远等比不拉伸 */
   border-radius: 10px;
   overflow: hidden;
   box-shadow:
@@ -46,12 +60,20 @@ body {
   background: #05070c;
 }
 
+/* 触屏（手机 / 平板）：铺满整屏，去掉桌面装饰 */
+body.touch-mode #stage {
+  border-radius: 0;
+  box-shadow: none;
+}
+body.touch-mode #fs-btn { display: none; }
+
 #game-canvas {
   display: block;
   width: 100%;
   height: 100%;
   cursor: none;
   image-rendering: auto;
+  touch-action: none;
 }
 
 #ui-layer {
@@ -60,10 +82,10 @@ body {
   pointer-events: none;
 }
 
-/* ---------- 全屏按钮 ---------- */
+/* ---------- 全屏按钮（右下角，避开右上小地图） ---------- */
 #fs-btn {
   position: absolute;
-  top: 14px;
+  bottom: 14px;
   right: 16px;
   pointer-events: auto;
   padding: 7px 14px;
@@ -162,10 +184,118 @@ body {
 .primary-btn:active { transform: translateY(1px); }
 
 .ov-hint {
-  margin-top: 20px;
+  margin-top: 16px;
   font-size: 11.5px;
   letter-spacing: 1px;
   color: #5d6f7e;
+}
+
+/* ---------- Seed 输入 ---------- */
+#seed-input {
+  display: block;
+  margin: 18px auto 0;
+  width: 220px;
+  padding: 9px 12px;
+  text-align: center;
+  font: 700 13px/1 "Segoe UI", system-ui, sans-serif;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #ffd28a;
+  background: rgba(8, 12, 18, 0.85);
+  border: 1px solid rgba(120, 190, 220, 0.28);
+  border-radius: 6px;
+  outline: none;
+  transition: border-color .18s, box-shadow .18s;
+}
+#seed-input::placeholder {
+  color: #56687a;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  text-transform: none;
+}
+#seed-input:focus {
+  border-color: rgba(255, 190, 100, 0.7);
+  box-shadow: 0 0 12px rgba(255, 170, 60, 0.22);
+}
+
+/* ===========================================================
+   竖屏提示（在 #stage 之外，不随画布缩放）
+   =========================================================== */
+#rotate-hint {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(3, 5, 9, 0.94);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+#rotate-hint.hidden { display: none; }
+
+.rh-box {
+  width: min(420px, 86%);
+  padding: 30px 26px 24px;
+  text-align: center;
+  border: 1px solid rgba(255, 168, 76, 0.22);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(18, 22, 30, .95) 0%, rgba(9, 12, 17, .97) 100%);
+}
+.rh-icon {
+  font-size: 46px;
+  line-height: 1;
+  color: #ffcf8a;
+  animation: rh-rotate 2.4s ease-in-out infinite;
+}
+@keyframes rh-rotate {
+  0%, 45% { transform: rotate(0deg); }
+  70%, 100% { transform: rotate(90deg); }
+}
+.rh-title {
+  margin-top: 16px;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: #ffcf8a;
+}
+.rh-sub {
+  margin-top: 8px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: #9fb0c0;
+}
+#rh-btn {
+  margin-top: 20px;
+  padding: 10px 26px;
+  font: 700 14px/1 "Segoe UI", "PingFang SC", system-ui, sans-serif;
+  letter-spacing: 2px;
+  color: #7fd7ea;
+  background: rgba(12, 26, 34, 0.8);
+  border: 1px solid rgba(90, 190, 215, 0.4);
+  border-radius: 8px;
+}
+
+/* ===========================================================
+   小屏排版：舞台整体被 scale 缩小，这里按比例放大字号补偿
+   =========================================================== */
+@media (max-height: 560px) {
+  .panel { width: min(760px, 90%); padding: 22px 28px 20px; }
+  .ov-kicker { font-size: 13px; margin-bottom: 10px; }
+  .ov-title-cn { font-size: 60px; letter-spacing: 12px; }
+  .ov-title-en { font-size: 17px; letter-spacing: 9px; }
+  .ov-text { font-size: 18px; line-height: 1.75; margin: 16px auto 18px; max-width: 600px; }
+  .primary-btn { padding: 16px 42px; font-size: 20px; }
+  #seed-input { width: 300px; padding: 12px 14px; font-size: 16px; }
+  .ov-hint { font-size: 15px; margin-top: 14px; }
+}
+
+@media (max-width: 560px) {
+  .panel { width: 92%; padding: 24px 22px 20px; }
+  .ov-title-cn { font-size: 46px; letter-spacing: 6px; }
+  .ov-text { font-size: 15px; max-width: none; }
+  #seed-input { width: 86%; }
+  .primary-btn { padding: 14px 30px; font-size: 17px; }
 }
 
 </style>
@@ -189,9 +319,20 @@ body {
           你是最后的拾火者，收集余烬，向更深处走。
         </p>
         <button class="primary-btn" id="ov-btn" type="button">开始探索</button>
+        <input id="seed-input" type="text" maxlength="12" spellcheck="false"
+               placeholder="输入 Seed（留空则随机）" autocomplete="off">
         <div class="ov-hint" id="ov-hint">WASD 移动 · 鼠标瞄准 · 左键射击 · ESC 暂停 · F 全屏</div>
       </div>
     </div>
+  </div>
+</div>
+
+<div id="rotate-hint" class="hidden">
+  <div class="rh-box">
+    <div class="rh-icon">▭</div>
+    <div class="rh-title">横屏体验更佳</div>
+    <div class="rh-sub">把设备转向横向，回廊会铺满整块屏幕</div>
+    <button id="rh-btn" type="button">仍要竖屏</button>
   </div>
 </div>
 
@@ -236,6 +377,11 @@ function dist2(ax, ay, bx, by) {
 }
 function angleTo(ax, ay, bx, by) { return Math.atan2(by - ay, bx - ax); }
 
+/* 最短弧的角度差（b - a），范围 -PI..PI */
+function angleDelta(a, b) {
+  return ((b - a + Math.PI) % TAU + TAU) % TAU - Math.PI;
+}
+
 /* 角度插值（走最短弧） */
 function angleLerp(a, b, t) {
   let d = ((b - a + Math.PI) % TAU + TAU) % TAU - Math.PI;
@@ -250,6 +396,7 @@ function hash2(x, y) {
 
 /* 缓动 */
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
 function easeOutBack(t) {
   const c1 = 1.70158, c3 = c1 + 1;
   return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
@@ -281,6 +428,59 @@ function polygonPath(ctx, points) {
   ctx.closePath();
 }
 
+/* ===========================================================
+   种子随机数系统
+   —— 地图 / 房间类型 / 敌人 / 道具 / 宝箱 使用 Rng（可复现）
+   —— 粒子、抖动等表现层随机继续用 Math.random，不影响复现性
+   =========================================================== */
+function hashSeed(str) {
+  let h = 2166136261 >>> 0;
+  str = String(str);
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+class Rng {
+  constructor(seed) {
+    const s = (typeof seed === 'number' ? seed : hashSeed(seed)) >>> 0;
+    this.s = s === 0 ? 1 : s;
+  }
+  /* mulberry32 */
+  next() {
+    this.s = (this.s + 0x6D2B79F5) >>> 0;
+    let t = this.s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  range(a, b) { return a + this.next() * (b - a); }
+  int(a, b) { return Math.floor(a + this.next() * (b - a + 1)); }   // 闭区间
+  pick(arr) { return arr[Math.floor(this.next() * arr.length)]; }
+  chance(p) { return this.next() < p; }
+  shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(this.next() * (i + 1));
+      const t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+  fork(salt) { return new Rng(hashSeed(this.s + '|' + String(salt))); }
+}
+
+const SEED_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function randomSeedString(len) {
+  len = len || 6;
+  let s = '';
+  for (let i = 0; i < len; i++) {
+    s += SEED_ALPHABET[Math.floor(Math.random() * SEED_ALPHABET.length)];
+  }
+  return s;
+}
+
 </script>
 <script>
 /* ===========================================================
@@ -296,6 +496,8 @@ class Input {
     this.pressed = new Set();    // 本帧刚按下（每帧末清空）
     this.mouse = { cx: 0, cy: 0, down: false };
     this.mouseWorld = { x: VIEW_W * 0.5, y: VIEW_H * 0.5 };
+    this._mv = { x: 0, y: 0 };   // moveVector 的复用对象
+    this.touch = new TouchControls(canvas);
     this._bind();
   }
 
@@ -317,6 +519,7 @@ class Input {
     window.addEventListener('blur', () => {
       this.keys.clear();
       this.mouse.down = false;
+      if (this.touch) this.touch.releaseAll();
       if (this.onBlur) this.onBlur();
     });
 
@@ -344,6 +547,37 @@ class Input {
   isDown(code) { return this.keys.has(code); }
   wasPressed(code) { return this.pressed.has(code); }
 
+  /* 移动向量：键盘方向键 / WASD 与虚拟摇杆合并，结果已归一化（长度 <= 1） */
+  moveVector() {
+    let mx = 0, my = 0;
+    if (this.isDown('KeyA') || this.isDown('ArrowLeft')) mx -= 1;
+    if (this.isDown('KeyD') || this.isDown('ArrowRight')) mx += 1;
+    if (this.isDown('KeyW') || this.isDown('ArrowUp')) my -= 1;
+    if (this.isDown('KeyS') || this.isDown('ArrowDown')) my += 1;
+
+    const t = this.touch;
+    if (t && t.move.active) { mx += t.move.x; my += t.move.y; }
+
+    const len = Math.hypot(mx, my);
+    if (len > 1) { mx /= len; my /= len; }
+    this._mv.x = mx; this._mv.y = my;
+    return this._mv;
+  }
+
+  /* 是否正在开火：鼠标左键 或 瞄准摇杆按住 */
+  firing() {
+    return this.mouse.down || !!(this.touch && this.touch.firing);
+  }
+
+  /* 触屏瞄准方向（单位向量），未使用摇杆时返回 null */
+  aimDir() {
+    const t = this.touch;
+    if (!t || !t.aim.active) return null;
+    if (t.aim.x === 0 && t.aim.y === 0) return null;
+    const len = Math.hypot(t.aim.x, t.aim.y) || 1;
+    return { x: t.aim.x / len, y: t.aim.y / len };
+  }
+
   /* 把客户端坐标换算成逻辑世界坐标 */
   toWorld() {
     const r = this.canvas.getBoundingClientRect();
@@ -356,6 +590,153 @@ class Input {
   /* 每帧末调用 */
   endFrame() {
     this.pressed.clear();
+  }
+}
+
+</script>
+<script>
+/* ===========================================================
+   touch.js — 移动端触控（虚拟双摇杆 + 屏幕按钮）
+   左半屏：移动摇杆
+   右半屏：瞄准摇杆（按住即持续射击）
+   所有坐标都换算成 1280x720 的逻辑世界坐标，与画布缩放完全解耦
+   =========================================================== */
+'use strict';
+
+class TouchControls {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.active = false;             // 是否处于触屏模式（首次真实触摸后置真）
+    this.radius = 84;                // 摇杆半径（逻辑坐标）
+    this.deadZone = 0.12;            // 归一化死区
+    this.firing = false;
+
+    this.move = { id: null, x: 0, y: 0, ax: 0, ay: 0, active: false };
+    this.aim = { id: null, x: 0, y: 0, ax: 0, ay: 0, active: false };
+
+    this.buttonsFn = null;           // () => [{ id, x, y, w, h }]
+    this.onButton = null;            // (id) => void
+
+    this._bind();
+  }
+
+  /* 客户端坐标 → 逻辑世界坐标（画布被 CSS transform 缩放也能正确换算） */
+  _toWorld(cx, cy) {
+    const r = this.canvas.getBoundingClientRect();
+    if (!r || r.width <= 0 || r.height <= 0) return { x: 0, y: 0 };
+    return {
+      x: (cx - r.left) * (VIEW_W / r.width),
+      y: (cy - r.top) * (VIEW_H / r.height)
+    };
+  }
+
+  _bind() {
+    const c = this.canvas;
+    if (!c || !c.addEventListener) return;
+
+    c.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse') return;      // 鼠标走原有逻辑
+      const p = this._toWorld(e.clientX, e.clientY);
+      this.onDown(e.pointerId, p.x, p.y);
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+
+    window.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'mouse') return;
+      const p = this._toWorld(e.clientX, e.clientY);
+      this.onMove(e.pointerId, p.x, p.y);
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+
+    const up = (e) => { if (e.pointerType !== 'mouse') this.onUp(e.pointerId); };
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  }
+
+  /* ---------- 供事件与测试调用的三件套 ---------- */
+  onDown(id, wx, wy) {
+    this.active = true;
+
+    /* 屏幕按钮优先：落在按钮上就不起摇杆 */
+    const btns = this.buttonsFn ? this.buttonsFn() : [];
+    for (let i = 0; i < btns.length; i++) {
+      const b = btns[i];
+      if (wx >= b.x && wx <= b.x + b.w && wy >= b.y && wy <= b.y + b.h) {
+        if (this.onButton) this.onButton(b.id);
+        return;
+      }
+    }
+
+    if (wx < VIEW_W * 0.5) {
+      if (this.move.id !== null) return;
+      this.move.id = id;
+      this.move.ax = wx; this.move.ay = wy;
+      this.move.x = 0; this.move.y = 0; this.move.active = true;
+    } else {
+      if (this.aim.id !== null) return;
+      this.aim.id = id;
+      this.aim.ax = wx; this.aim.ay = wy;
+      this.aim.x = 0; this.aim.y = 0; this.aim.active = true;
+      this.firing = true;
+    }
+  }
+
+  onMove(id, wx, wy) {
+    const st = (id === this.move.id) ? this.move
+      : (id === this.aim.id) ? this.aim : null;
+    if (!st) return;
+
+    const dx = wx - st.ax, dy = wy - st.ay;
+    const len = Math.hypot(dx, dy);
+    const mag = Math.min(1, len / this.radius);
+    if (mag < this.deadZone || len <= 0) { st.x = 0; st.y = 0; return; }
+    st.x = (dx / len) * mag;
+    st.y = (dy / len) * mag;
+  }
+
+  onUp(id) {
+    if (id === this.move.id) {
+      this.move.id = null; this.move.active = false; this.move.x = 0; this.move.y = 0;
+    }
+    if (id === this.aim.id) {
+      this.aim.id = null; this.aim.active = false; this.aim.x = 0; this.aim.y = 0;
+      this.firing = false;
+    }
+  }
+
+  releaseAll() {
+    this.move.id = null; this.move.active = false; this.move.x = 0; this.move.y = 0;
+    this.aim.id = null; this.aim.active = false; this.aim.x = 0; this.aim.y = 0;
+    this.firing = false;
+  }
+
+  /* ---------- 绘制 ---------- */
+  draw(ctx) {
+    if (!this.active) return;
+    this._stick(ctx, this.move, '127,215,234');
+    this._stick(ctx, this.aim, '255,179,71');
+  }
+
+  _stick(ctx, st, rgb) {
+    if (!st.active) return;
+    const R = this.radius;
+    ctx.save();
+    ctx.globalAlpha = 0.30;
+    ctx.fillStyle = 'rgba(' + rgb + ',0.16)';
+    ctx.beginPath();
+    ctx.arc(st.ax, st.ay, R, 0, TAU);
+    ctx.fill();
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = 'rgba(' + rgb + ',0.55)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.globalAlpha = 0.72;
+    ctx.fillStyle = 'rgba(' + rgb + ',0.72)';
+    ctx.beginPath();
+    ctx.arc(st.ax + st.x * R, st.ay + st.y * R, R * 0.4, 0, TAU);
+    ctx.fill();
+    ctx.restore();
   }
 }
 
@@ -719,11 +1100,71 @@ class Projectile {
     this.rot = opt.angle;
     this.trail = [];
     this.trailMax = opt.trailMax !== undefined ? opt.trailMax : 6;
+
+    /* ---- 道具机制快照（由 Player.shoot 拷贝进来） ---- */
+    const proto = defaultMods();
+    for (const k in proto) this[k] = opt[k] || 0;
+    this.game = opt.game || null;
+    this.speed = opt.speed || 0;
+    this.damageMul = opt.damageMul || 1;
+    this.splitLeft = opt.splitLeft || 0;
+    this.isChild = !!opt.isChild;
+    this.hitIds = [];                       // 穿透时避免重复命中
+    this.rehitT = 0;                        // 回旋弹的重复命中间隔
+    this.orbitDir = opt.orbitDir !== undefined ? opt.orbitDir : (chance(0.5) ? 1 : -1);
+    this.omega = 2.2 * this.orbitDir;
+  }
+
+  /* 追踪：朝最近的敌人缓慢转向 */
+  _steer(dt) {
+    const g = this.game;
+    if (!g || !g.room) return;
+    let best = null, bestD = 520 * 520;
+    for (const e of g.room.enemies) {
+      if (e.dead) continue;
+      const d = dist2(this.x, this.y, e.x, e.y);
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    if (!best) return;
+    const cur = Math.atan2(this.vy, this.vx);
+    const want = angleTo(this.x, this.y, best.x, best.y);
+    const rate = Math.min(7.5, 2.4 + this.homing * 2.2) * dt;
+    const na = cur + clamp(angleDelta(cur, want), -rate, rate);
+    this.vx = Math.cos(na) * this.speed;
+    this.vy = Math.sin(na) * this.speed;
+  }
+
+  /* 回旋：先划弧线，后半程折返飞回玩家 */
+  _orbit(dt) {
+    const cur = Math.atan2(this.vy, this.vx);
+    let na;
+    if (this.life < this.maxLife * 0.55 && this.game && this.game.player) {
+      const p = this.game.player;
+      const want = angleTo(this.x, this.y, p.x, p.y);
+      const rate = 5.0 * dt;
+      na = cur + clamp(angleDelta(cur, want), -rate, rate);
+    } else {
+      na = cur + this.omega * dt;
+    }
+    this.vx = Math.cos(na) * this.speed;
+    this.vy = Math.sin(na) * this.speed;
   }
 
   update(dt) {
     this.trail.push(this.x, this.y);
     if (this.trail.length > this.trailMax * 2) this.trail.splice(0, 2);
+
+    if (this.homing > 0 && this.friendly) this._steer(dt);
+    if (this.orbit > 0) {
+      this._orbit(dt);
+      /* 回旋弹可以反复命中同一目标 */
+      this.rehitT -= dt;
+      if (this.rehitT <= 0) {
+        this.rehitT = this.orbitPierce > 0 ? 0.18 : 0.38;
+        this.hitIds.length = 0;
+      }
+    }
+
     this.x += this.vx * dt;
     this.y += this.vy * dt;
     this.rot += this.spin * dt;
@@ -789,21 +1230,44 @@ class Player {
     this.y = y;
     this.r = 15;
 
-    /* ---- 属性 ---- */
-    this.maxHp = 100;
-    this.hp = 100;
-    this.moveSpeed = 262;
-    this.damage = 11;
-    this.fireInterval = 0.17;
-    this.bulletSpeed = 660;
-    this.bulletRadius = 5;
-    this.bulletCount = 1;
-    this.critChance = 0.08;
+    /* ---- 基础属性（道具系统的叠加基准，只在这里写一次） ---- */
+    this.base = {
+      maxHp: 100,
+      damage: 11,
+      fireInterval: 0.17,
+      moveSpeed: 262,
+      bulletSpeed: 660,
+      bulletRadius: 5,
+      bulletCount: 1,
+      critChance: 0.08,
+      critDamage: 2.0,
+      range: 1060,
+      invulnTime: 0.9
+    };
+
+    /* ---- 属性（由 Build.recompute() 每次重新写入） ---- */
+    this.maxHp = this.base.maxHp;
+    this.hp = this.base.maxHp;
+    this.moveSpeed = this.base.moveSpeed;
+    this.damage = this.base.damage;
+    this.fireInterval = this.base.fireInterval;
+    this.bulletSpeed = this.base.bulletSpeed;
+    this.bulletRadius = this.base.bulletRadius;
+    this.bulletCount = this.base.bulletCount;
+    this.critChance = this.base.critChance;
+    this.critDamage = this.base.critDamage;
+    this.range = this.base.range;
+    this.armor = 0;
+    this.regen = 0;
+
+    /* ---- Build（道具 / 组合） ---- */
+    this.build = new Build(this);
+    this.mods = this.build.mods;
 
     /* ---- 运行时状态 ---- */
     this.fireTimer = 0;
     this.invuln = 0;
-    this.invulnTime = 0.9;
+    this.invulnTime = this.base.invulnTime;
     this.aim = -Math.PI / 2;
     this.moving = false;
     this.walkPhase = 0;
@@ -811,6 +1275,15 @@ class Player {
     this.hurtFlash = 0;
     this.dead = false;
     this.shotsFired = 0;
+    this.trailT = 0;      // 烬迹计时
+  }
+
+  /* 拾取道具（所有入口统一走这里） */
+  gainItem(itemId) {
+    const it = this.build.add(itemId);
+    if (!it) return null;
+    this.game.ownedItems.push(itemId);
+    return it;
   }
 
   get alive() { return !this.dead; }
@@ -821,17 +1294,14 @@ class Player {
   update(dt, input) {
     if (this.dead) return;
 
-    /* 移动 */
-    let mx = 0, my = 0;
-    if (input.isDown('KeyW') || input.isDown('ArrowUp')) my -= 1;
-    if (input.isDown('KeyS') || input.isDown('ArrowDown')) my += 1;
-    if (input.isDown('KeyA') || input.isDown('ArrowLeft')) mx -= 1;
-    if (input.isDown('KeyD') || input.isDown('ArrowRight')) mx += 1;
+    /* 移动（键盘 WASD/方向键 与 触屏虚拟摇杆统一走 Input.moveVector） */
+    const v = input.moveVector();
+    let mx = v.x, my = v.y;
+    const vlen = Math.hypot(mx, my);
 
-    this.moving = (mx !== 0 || my !== 0);
+    this.moving = vlen > 0.001;
     if (this.moving) {
-      const len = Math.hypot(mx, my);
-      mx /= len; my /= len;
+      if (vlen > 1) { mx /= vlen; my /= vlen; }
       const sp = this.moveSpeed;
       this.x += mx * sp * dt;
       this.y += my * sp * dt;
@@ -850,10 +1320,29 @@ class Player {
     const m = this.game.mouseWorld;
     this.aim = angleTo(this.x, this.y, m.x, m.y);
 
+    /* 生命回复 */
+    if (this.regen > 0 && this.hp > 0 && this.hp < this.maxHp) {
+      this._regenAcc = (this._regenAcc || 0) + this.regen * dt;
+      if (this._regenAcc >= 1) {
+        const g = Math.floor(this._regenAcc);
+        this._regenAcc -= g;
+        this.hp = Math.min(this.maxHp, this.hp + g);
+      }
+    }
+
+    /* 烬迹：身周持续灼烧 */
+    if (this.mods.trailFire > 0) {
+      this.trailT -= dt;
+      if (this.trailT <= 0) {
+        this.trailT = 0.3;
+        this.game.burnAround(this.x, this.y, 66, this.mods.trailFire * 3);
+      }
+    }
+
     /* 射击 */
     this.fireTimer -= dt;
     this.recoil = Math.max(0, this.recoil - dt * 9);
-    if (input.mouse.down && this.fireTimer <= 0) {
+    if (input.firing() && this.fireTimer <= 0) {
       this.shoot();
       this.fireTimer = this.fireInterval;
     }
@@ -870,15 +1359,20 @@ class Player {
      射击
      --------------------------------------------------------- */
   shoot() {
-    const spreadTotal = this.bulletCount > 1 ? 0.11 * (this.bulletCount - 1) : 0;
+    const m = this.mods;
+    const n = this.bulletCount;
+    const spreadTotal = n > 1 ? 0.11 * (n - 1) : 0;
     const start = this.aim - spreadTotal * 0.5;
     const muzzleLen = this.r + 8;
+    const life = this.range / this.bulletSpeed;
+    const eff = this.build.shotEffects();
 
-    for (let i = 0; i < this.bulletCount; i++) {
-      const a = this.bulletCount > 1 ? start + (spreadTotal / (this.bulletCount - 1)) * i : this.aim;
+    for (let i = 0; i < n; i++) {
+      const a = n > 1 ? start + (spreadTotal / (n - 1)) * i : this.aim;
       const px = this.x + Math.cos(a) * muzzleLen;
       const py = this.y + Math.sin(a) * muzzleLen;
-      this.game.spawnProjectile({
+
+      const opt = {
         x: px, y: py,
         angle: a,
         speed: this.bulletSpeed,
@@ -887,8 +1381,23 @@ class Player {
         friendly: true,
         color: '#ffb347',
         core: '#fff6da',
-        life: 1.6
-      });
+        life: life,
+        game: this.game,
+        spin: m.orbit > 0 ? 9 : 0
+      };
+      /* 机制快照：一次拷贝，之后与 Build 解耦 */
+      for (const k in eff) opt[k] = eff[k];
+      opt.splitLeft = m.split;          // 剩余可分裂次数
+      opt.isChild = false;
+      opt.damageMul = 1;
+
+      /* 外观随机制变化 */
+      if (m.poison > 0) { opt.color = '#9ad14f'; opt.core = '#e8ffb0'; }
+      else if (m.freeze > 0) { opt.color = '#8fd8ff'; opt.core = '#ffffff'; }
+      else if (m.homing > 0) { opt.color = '#7fe4ff'; }
+      else if (m.explode > 0) { opt.color = '#ff8a5c'; }
+
+      this.game.spawnProjectile(opt);
     }
 
     this.shotsFired++;
@@ -907,7 +1416,8 @@ class Player {
   takeDamage(amount, srcX, srcY) {
     if (this.dead || this.invuln > 0) return false;
 
-    this.hp -= amount;
+    const real = Math.max(1, Math.round(amount - (this.armor || 0)));
+    this.hp -= real;
     this.invuln = this.invulnTime;
     this.hurtFlash = 1;
     this.game.addShake(7);
@@ -1048,6 +1558,931 @@ class Player {
 </script>
 <script>
 /* ===========================================================
+   items.js — 数据驱动的道具 / Build 系统
+   ------------------------------------------------------------
+   新增道具只需往 ITEMS 里加一个数据对象：
+     {
+       id, name, cat, color, max,
+       desc,            // 鼠标悬停时显示的说明
+       stats: { ... },  // 基础属性增量（可选）
+       flags: { ... }   // 特殊机制层数（可选）
+     }
+   新增组合只需往 COMBOS 里加一条：
+     { id, name, desc, need:{flag:层数}, grant:{flag:层数} }
+   核心战斗代码不需要改动。
+   =========================================================== */
+'use strict';
+
+/* ---------------- 分类 ---------------- */
+const ITEM_CAT = {
+  attack: { cn: '攻击', color: '#ff8a5c', glyph: '⚔' },
+  defense: { cn: '防御', color: '#7dffb0', glyph: '❖' },
+  move: { cn: '移动', color: '#7fe4ff', glyph: '»' },
+  proj: { cn: '投射物', color: '#aef0ff', glyph: '◆' },
+  special: { cn: '特殊机制', color: '#c08bff', glyph: '✦' }
+};
+
+/* ---------------- 特殊机制（层数，可叠加） ---------------- */
+const MOD_KEYS = [
+  'pierce', 'split', 'bounce', 'homing', 'explode', 'orbit',
+  'lifesteal', 'poison', 'burn', 'freeze', 'slow', 'knockback',
+  'chain', 'thorns', 'trailFire', 'killBlast'
+];
+
+/* 机制中文名（UI 提示用） */
+const MOD_CN = {
+  pierce: '穿透', split: '分裂', bounce: '反弹', homing: '追踪',
+  explode: '爆炸', orbit: '回旋', lifesteal: '吸血', poison: '中毒',
+  burn: '燃烧', freeze: '冰冻', slow: '减速', knockback: '击退',
+  chain: '链式', thorns: '荆棘', trailFire: '烬迹', killBlast: '击杀爆'
+};
+
+function defaultMods() {
+  const m = {
+    pierce: 0, split: 0, bounce: 0, homing: 0, explode: 0, orbit: 0,
+    lifesteal: 0, poison: 0, burn: 0, freeze: 0, slow: 0, knockback: 0,
+    chain: 0, thorns: 0, trailFire: 0, killBlast: 0
+  };
+  /* 组合专属标记（由 COMBOS 授予，供战斗代码读取） */
+  const combo = [
+    'pierceSplit', 'homingExplode', 'freezeExplode', 'poisonSplit',
+    'burnPierce', 'bounceHoming', 'bounceExplode', 'chainPoison',
+    'chainBurn', 'slowKnock', 'critVamp', 'orbitPierce', 'orbitExplode',
+    'freezePierce', 'slowExplode', 'dotVamp', 'knockBounce', 'splitHoming',
+    'burnExplode', 'chainExplode', 'frostField', 'endlessRefract'
+  ];
+  for (const k of combo) m[k] = 0;
+  return m;
+}
+
+/* ===========================================================
+   道具表（38 件，全部原创）
+   =========================================================== */
+const ITEMS = [
+  /* ---------------- 攻击 ---------------- */
+  {
+    id: 'ember_core', name: '裂焰核心', cat: 'attack', color: '#ff9d3c', max: 6,
+    desc: '攻击力 +3，命中附加 1 层灼烧（持续掉血）。',
+    stats: { damage: 3 }, flags: { burn: 1 }
+  },
+  {
+    id: 'ember_lance', name: '焰锥长钉', cat: 'attack', color: '#ffb347', max: 4,
+    desc: '攻击力 +18%，暴击伤害 +30%。',
+    stats: { damagePct: 0.18, critDamage: 0.3 }
+  },
+  {
+    id: 'rift_edge', name: '裂隙锋刃', cat: 'attack', color: '#ffe08a', max: 4,
+    desc: '暴击率 +12%，暴击伤害 +25%。',
+    stats: { critChance: 0.12, critDamage: 0.25 }
+  },
+  {
+    id: 'echo_hammer', name: '回响重锤', cat: 'attack', color: '#ff6b5c', max: 3,
+    desc: '攻击力 +40%，但攻击间隔 +18%（更慢更重）。',
+    stats: { damagePct: 0.40, fireRate: -0.18 }
+  },
+  {
+    id: 'overheat_coil', name: '过载线圈', cat: 'attack', color: '#ffd35e', max: 4,
+    desc: '攻击速度 +20%，攻击力 +1。',
+    stats: { fireRate: 0.20, damage: 1 }
+  },
+  {
+    id: 'cinder_twin', name: '双生烬芯', cat: 'attack', color: '#ff7a7a', max: 3,
+    desc: '子弹数量 +1，单发攻击力 -10%。',
+    stats: { bulletCount: 1, damagePct: -0.10 }
+  },
+  {
+    id: 'brand_iron', name: '烙印铁', cat: 'attack', color: '#ff5d3c', max: 4,
+    desc: '灼烧层数 +2，攻击力 +1。灼烧可被穿透与分裂继承。',
+    stats: { damage: 1 }, flags: { burn: 2 }
+  },
+  {
+    id: 'judgement_prism', name: '断罪棱镜', cat: 'attack', color: '#ff4d6b', max: 3,
+    desc: '暴击伤害 +60%，暴击率 +5%。',
+    stats: { critDamage: 0.6, critChance: 0.05 }
+  },
+
+  /* ---------------- 防御 ---------------- */
+  {
+    id: 'ember_heart', name: '余烬之心', cat: 'defense', color: '#ff6b8a', max: 6,
+    desc: '最大生命 +22，并立即回复等量生命。',
+    stats: { maxHp: 22 }
+  },
+  {
+    id: 'ash_plate', name: '灰鳞护板', cat: 'defense', color: '#8fa3b5', max: 4,
+    desc: '最大生命 +32，移动速度 -12（笨重但耐打）。',
+    stats: { maxHp: 32, moveSpeed: -12 }
+  },
+  {
+    id: 'ember_bulwark', name: '烬墙壁垒', cat: 'defense', color: '#7dffb0', max: 3,
+    desc: '最大生命 +46，攻击速度 -10%。',
+    stats: { maxHp: 46, fireRate: -0.10 }
+  },
+  {
+    id: 'ember_thorn', name: '烬刺外皮', cat: 'defense', color: '#c8ff6a', max: 4,
+    desc: '被近身接触时，对敌人反弹 10 点伤害（每层）。',
+    flags: { thorns: 1 }
+  },
+  {
+    id: 'mend_cinder', name: '愈合烬屑', cat: 'defense', color: '#9ad14f', max: 4,
+    desc: '每秒回复 0.7 点生命（每层）。',
+    stats: { regen: 0.7 }
+  },
+  {
+    id: 'warden_shell', name: '守望残壳', cat: 'defense', color: '#7fd7ea', max: 3,
+    desc: '最大生命 +18，每次受伤减免 2 点伤害。',
+    stats: { maxHp: 18, dr: 2 }
+  },
+  {
+    id: 'pulse_ward', name: '脉动护符', cat: 'defense', color: '#aef0ff', max: 3,
+    desc: '最大生命 +14，受伤后的无敌时间 +0.22 秒。',
+    stats: { maxHp: 14, invuln: 0.22 }
+  },
+
+  /* ---------------- 移动 ---------------- */
+  {
+    id: 'swift_ash', name: '疾行灰烬', cat: 'move', color: '#7dffb0', max: 5,
+    desc: '移动速度 +26。',
+    stats: { moveSpeed: 26 }
+  },
+  {
+    id: 'phase_step', name: '相位步履', cat: 'move', color: '#7fe4ff', max: 3,
+    desc: '移动速度 +12%，攻击速度 +6%。',
+    stats: { moveSpeedPct: 0.12, fireRate: 0.06 }
+  },
+  {
+    id: 'drift_cloak', name: '流影斗篷', cat: 'move', color: '#8fd8ff', max: 3,
+    desc: '移动速度 +16，暴击率 +6%。',
+    stats: { moveSpeed: 16, critChance: 0.06 }
+  },
+  {
+    id: 'dash_spark', name: '闪燃推进', cat: 'move', color: '#ffd35e', max: 2,
+    desc: '移动速度 +42，最大生命 -8（燃料在烧你的血）。',
+    stats: { moveSpeed: 42, maxHp: -8 }
+  },
+  {
+    id: 'gravity_anchor', name: '重力锚', cat: 'move', color: '#c08bff', max: 3,
+    desc: '移动速度 -20，攻击力 +26%，击退 +1 层（站桩炮台流）。',
+    stats: { moveSpeed: -20, damagePct: 0.26 }, flags: { knockback: 1 }
+  },
+  {
+    id: 'trail_fire', name: '烬迹', cat: 'move', color: '#ff8a5c', max: 3,
+    desc: '移动速度 +12，身周持续燃起烬火灼烧靠近的敌人。',
+    stats: { moveSpeed: 12 }, flags: { trailFire: 1 }
+  },
+
+  /* ---------------- 投射物 ---------------- */
+  {
+    id: 'prism_split', name: '分光棱镜', cat: 'proj', color: '#7fe4ff', max: 3,
+    desc: '子弹命中后分裂出 2 枚碎片（每层 +2 枚）。',
+    flags: { split: 2 }
+  },
+  {
+    id: 'pierce_rod', name: '贯钉', cat: 'proj', color: '#aef0ff', max: 4,
+    desc: '子弹可多穿透 1 个敌人（每层）。',
+    flags: { pierce: 1 }
+  },
+  {
+    id: 'ricochet_ring', name: '折跃环', cat: 'proj', color: '#5aa9ff', max: 4,
+    desc: '子弹撞墙后反弹 1 次（每层）。',
+    flags: { bounce: 1 }
+  },
+  {
+    id: 'seeker_eye', name: '寻迹棱目', cat: 'proj', color: '#7fd7ea', max: 3,
+    desc: '子弹自动追踪最近的敌人（层数越高转向越急）。',
+    flags: { homing: 1 }
+  },
+  {
+    id: 'heavy_mold', name: '重弹铸模', cat: 'proj', color: '#ff5d5d', max: 3,
+    desc: '子弹体积 +2、攻击力 +20%，子弹速度 -12%。',
+    stats: { bulletRadius: 2, damagePct: 0.20, bulletSpeedPct: -0.12 }
+  },
+  {
+    id: 'long_barrel', name: '长焰枪膛', cat: 'proj', color: '#ffd35e', max: 3,
+    desc: '射程 +280，子弹速度 +12%。',
+    stats: { range: 280, bulletSpeedPct: 0.12 }
+  },
+  {
+    id: 'storm_seed', name: '风暴之种', cat: 'proj', color: '#c8ff6a', max: 2,
+    desc: '子弹数量 +1、攻击速度 +10%，子弹体积 -1。',
+    stats: { bulletCount: 1, fireRate: 0.10, bulletRadius: -1 }
+  },
+  {
+    id: 'boomerang_core', name: '回旋核', cat: 'proj', color: '#c08bff', max: 2,
+    desc: '子弹沿弧线回旋飞行，并可重复命中同一敌人。',
+    flags: { orbit: 1 }
+  },
+
+  /* ---------------- 特殊机制 ---------------- */
+  {
+    id: 'venom_vial', name: '腐雾瓶', cat: 'special', color: '#9ad14f', max: 4,
+    desc: '命中附加 2 层中毒（可叠加，持续掉血）。',
+    flags: { poison: 2 }
+  },
+  {
+    id: 'frost_shard', name: '霜棱', cat: 'special', color: '#8fd8ff', max: 3,
+    desc: '命中有 18% 几率冻结敌人 0.9 秒（每层叠加几率与时长）。',
+    flags: { freeze: 1 }
+  },
+  {
+    id: 'mire_chain', name: '滞沼锁链', cat: 'special', color: '#5aa9ff', max: 4,
+    desc: '命中使敌人减速 15%（每层），可叠加至 60%。',
+    flags: { slow: 1 }
+  },
+  {
+    id: 'shove_charge', name: '推流装药', cat: 'special', color: '#ffb347', max: 3,
+    desc: '命中把敌人狠狠击退（层数越高推得越远）。',
+    flags: { knockback: 1 }
+  },
+  {
+    id: 'arc_link', name: '弧光链接', cat: 'special', color: '#7fe4ff', max: 3,
+    desc: '命中后电弧跳跃到 1 个附近敌人（每层 +1 个）。',
+    flags: { chain: 1 }
+  },
+  {
+    id: 'vampiric_fang', name: '噬血獠牙', cat: 'special', color: '#ff4d6b', max: 4,
+    desc: '造成伤害的 8% 转化为生命（每层）。',
+    flags: { lifesteal: 1 }
+  },
+  {
+    id: 'martyr_sigil', name: '殉爆符', cat: 'special', color: '#ff8a5c', max: 3,
+    desc: '子弹命中或寿命结束时引爆，造成范围伤害。',
+    flags: { explode: 1 }
+  },
+  {
+    id: 'echo_resonance', name: '余烬回响', cat: 'special', color: '#ffd35e', max: 3,
+    desc: '击杀敌人时在其位置引发一次小爆炸。',
+    flags: { killBlast: 1 }
+  },
+  {
+    id: 'crystal_resonance', name: '棱晶共鸣', cat: 'special', color: '#c08bff', max: 2,
+    desc: '穿透 +1 层，链式跳跃 +1 次。',
+    flags: { pierce: 1, chain: 1 }
+  }
+];
+
+const ITEM_BY_ID = {};
+for (const it of ITEMS) ITEM_BY_ID[it.id] = it;
+
+/* ===========================================================
+   组合效果（22 个）—— 满足条件即自动生效
+   need：需要的机制层数；needStat：需要的最终属性阈值
+   grant：授予的组合标记；grantStat：追加属性
+   =========================================================== */
+const COMBOS = [
+  {
+    id: 'pierce_split', name: '贯穿分裂', color: '#aef0ff',
+    need: { pierce: 1, split: 1 }, grant: { pierceSplit: 1 },
+    desc: '穿透后继续分裂：子弹每穿过一个敌人，都会再甩出一枚碎片。'
+  },
+  {
+    id: 'homing_explode', name: '追猎爆轰', color: '#ff8a5c',
+    need: { homing: 1, explode: 1 }, grant: { homingExplode: 1 },
+    desc: '追踪投射物命中后必定引爆，且爆炸半径 +35%。'
+  },
+  {
+    id: 'freeze_explode', name: '冰霜爆裂', color: '#8fd8ff',
+    need: { freeze: 1, explode: 1 }, grant: { freezeExplode: 1 },
+    desc: '被冻结的敌人死亡时炸出冰霜冲击，并冻结周围敌人。'
+  },
+  {
+    id: 'poison_split', name: '毒染裂片', color: '#9ad14f',
+    need: { poison: 1, split: 1 }, grant: { poisonSplit: 1 },
+    desc: '分裂碎片完整继承毒素层数。'
+  },
+  {
+    id: 'burn_pierce', name: '灼痕贯穿', color: '#ff5d3c',
+    need: { burn: 1, pierce: 1 }, grant: { burnPierce: 1 },
+    desc: '穿透时每穿过一个敌人，灼烧层数 +1。'
+  },
+  {
+    id: 'bounce_homing', name: '回响制导', color: '#7fd7ea',
+    need: { bounce: 1, homing: 1 }, grant: { bounceHoming: 1 },
+    desc: '子弹每次撞墙反弹后都会重新锁定一个新目标。'
+  },
+  {
+    id: 'bounce_explode', name: '弹壁雷暴', color: '#ffd35e',
+    need: { bounce: 1, explode: 1 }, grant: { bounceExplode: 1 },
+    desc: '子弹每次撞墙都会炸开一次。'
+  },
+  {
+    id: 'chain_poison', name: '疫链', color: '#c8ff6a',
+    need: { chain: 1, poison: 1 }, grant: { chainPoison: 1 },
+    desc: '电弧跳跃时把毒素一起传导过去。'
+  },
+  {
+    id: 'chain_burn', name: '燃链', color: '#ff9d3c',
+    need: { chain: 1, burn: 1 }, grant: { chainBurn: 1 },
+    desc: '电弧跳跃时点燃沿途的所有敌人。'
+  },
+  {
+    id: 'slow_knock', name: '滞重推流', color: '#5aa9ff',
+    need: { slow: 1, knockback: 1 }, grant: { slowKnock: 1 },
+    desc: '被减速的敌人受到的击退距离翻倍。'
+  },
+  {
+    id: 'crit_vamp', name: '嗜血锋刃', color: '#ff4d6b',
+    need: { lifesteal: 1 }, needStat: { critChance: 0.25 }, grant: { critVamp: 1 },
+    desc: '暴击时的吸血效果提升至 3 倍。'
+  },
+  {
+    id: 'orbit_pierce', name: '回旋利刃', color: '#c08bff',
+    need: { orbit: 1, pierce: 1 }, grant: { orbitPierce: 1 },
+    desc: '回旋子弹的重复命中间隔缩短一半，且穿透不消耗层数。'
+  },
+  {
+    id: 'orbit_explode', name: '回旋爆核', color: '#ff8a5c',
+    need: { orbit: 1, explode: 1 }, grant: { orbitExplode: 1 },
+    desc: '回旋子弹每次命中都会在原地留下一颗延时爆核。'
+  },
+  {
+    id: 'freeze_pierce', name: '霜锥贯穿', color: '#aef0ff',
+    need: { freeze: 1, pierce: 1 }, grant: { freezePierce: 1 },
+    desc: '穿透命中必定冻结，冻结时长 +50%。'
+  },
+  {
+    id: 'slow_explode', name: '泥沼爆', color: '#7fd7ea',
+    need: { slow: 1, explode: 1 }, grant: { slowExplode: 1 },
+    desc: '爆炸会在原地留下减速泥沼，持续 2.5 秒。'
+  },
+  {
+    id: 'dot_vamp', name: '腐化生机', color: '#9ad14f',
+    need: { lifesteal: 1, poison: 1 }, grant: { dotVamp: 1 },
+    desc: '中毒与灼烧造成的持续伤害也会为你回血。'
+  },
+  {
+    id: 'knock_bounce', name: '撞壁回弹', color: '#ffb347',
+    need: { knockback: 1, bounce: 1 }, grant: { knockBounce: 1 },
+    desc: '被击退的敌人撞到墙壁会反弹并受到额外伤害。'
+  },
+  {
+    id: 'split_homing', name: '分导裂片', color: '#7fe4ff',
+    need: { split: 1, homing: 1 }, grant: { splitHoming: 1 },
+    desc: '分裂出的碎片会各自追踪不同的敌人。'
+  },
+  {
+    id: 'burn_explode', name: '焚爆', color: '#ff6b5c',
+    need: { burn: 1, explode: 1 }, grant: { burnExplode: 1 },
+    desc: '爆炸会引爆目标身上的灼烧，立即结算剩余伤害。'
+  },
+  {
+    id: 'chain_explode', name: '连环轰爆', color: '#ffd35e',
+    need: { chain: 1, explode: 1 }, grant: { chainExplode: 1 },
+    desc: '电弧命中的目标也会被引爆。'
+  },
+  {
+    id: 'frost_field', name: '极寒领域', color: '#8fd8ff',
+    need: { freeze: 1, slow: 1 }, grant: { frostField: 1 },
+    desc: '被冻结或减速的敌人会持续向外散发寒气，减速附近的同伴。'
+  },
+  {
+    id: 'endless_refract', name: '无尽折射', color: '#5aa9ff',
+    need: { pierce: 1, bounce: 1 }, grant: { endlessRefract: 1 },
+    desc: '子弹穿透敌人后反弹次数 +1，几乎不会停下的折射弹。'
+  }
+];
+
+/* ===========================================================
+   Build —— 玩家当前持有的道具与最终属性
+   =========================================================== */
+class Build {
+  constructor(player) {
+    this.player = player;
+    this.slots = [];           // [{ id, n }]
+    this.mods = defaultMods();
+    this.final = {};
+    this.comboList = [];
+  }
+
+  add(id) {
+    const it = ITEM_BY_ID[id];
+    if (!it) return null;
+    if (this.count(id) >= (it.max || 99)) return null;   // 达到堆叠上限
+    const slot = this.slots.find(s => s.id === id);
+    if (slot) slot.n++;
+    else this.slots.push({ id: id, n: 1 });
+    this.recompute();
+    return it;
+  }
+
+  count(id) {
+    const s = this.slots.find(x => x.id === id);
+    return s ? s.n : 0;
+  }
+
+  has(id) { return this.count(id) > 0; }
+
+  get length() { return this.slots.reduce((a, s) => a + s.n, 0); }
+
+  /* 叠加计算：属性 → 机制 → 组合 → 写回玩家 */
+  recompute() {
+    if (!this.player) return;
+    const p = this.player;
+    const b = p.base;
+
+    /* 1. 累加属性与机制 */
+    const st = {
+      maxHp: 0, damage: 0, damagePct: 0, fireRate: 0,
+      moveSpeed: 0, moveSpeedPct: 0, bulletSpeedPct: 0,
+      bulletRadius: 0, bulletCount: 0, range: 0,
+      critChance: 0, critDamage: 0, dr: 0, invuln: 0, regen: 0
+    };
+    const md = defaultMods();
+    for (const slot of this.slots) {
+      const it = ITEM_BY_ID[slot.id];
+      if (!it) continue;
+      const n = Math.min(slot.n, it.max || 99);
+      if (it.stats) for (const k in it.stats) st[k] = (st[k] || 0) + it.stats[k] * n;
+      if (it.flags) for (const k in it.flags) md[k] = (md[k] || 0) + it.flags[k] * n;
+    }
+
+    /* 2. 最终属性（供组合条件判断） */
+    const fin = {
+      maxHp: Math.max(20, b.maxHp + st.maxHp),
+      damage: Math.max(1, (b.damage + st.damage) * (1 + st.damagePct)),
+      fireInterval: Math.max(0.05, b.fireInterval / (1 + Math.max(-0.7, st.fireRate))),
+      moveSpeed: Math.max(90, (b.moveSpeed + st.moveSpeed) * (1 + st.moveSpeedPct)),
+      bulletSpeed: Math.max(120, b.bulletSpeed * (1 + st.bulletSpeedPct)),
+      bulletRadius: Math.max(2, b.bulletRadius + st.bulletRadius),
+      bulletCount: Math.max(1, Math.round(b.bulletCount + st.bulletCount)),
+      range: Math.max(200, b.range + st.range),
+      critChance: clamp(b.critChance + st.critChance, 0, 0.9),
+      critDamage: Math.max(1, b.critDamage + st.critDamage),
+      dr: Math.max(0, st.dr),
+      invuln: Math.max(0, st.invuln),
+      regen: Math.max(0, st.regen)
+    };
+
+    /* 3. 组合判定 */
+    this.comboList = [];
+    for (const c of COMBOS) {
+      let ok = true;
+      if (c.need) for (const k in c.need) if ((md[k] || 0) < c.need[k]) { ok = false; break; }
+      if (ok && c.needStat) {
+        for (const k in c.needStat) if ((fin[k] || 0) < c.needStat[k]) { ok = false; break; }
+      }
+      if (!ok) continue;
+      this.comboList.push(c);
+      if (c.grant) for (const k in c.grant) md[k] = (md[k] || 0) + c.grant[k];
+      if (c.grantStat) for (const k in c.grantStat) st[k] = (st[k] || 0) + c.grantStat[k];
+    }
+
+    /* 4. 写回玩家（保持既有字段语义不变） */
+    const prevMax = p.maxHp;
+    p.maxHp = Math.round(fin.maxHp);
+    if (p.maxHp > prevMax) p.hp += (p.maxHp - prevMax);
+    p.hp = Math.min(p.hp, p.maxHp);
+
+    p.damage = fin.damage;
+    p.fireInterval = fin.fireInterval;
+    p.moveSpeed = fin.moveSpeed;
+    p.bulletSpeed = fin.bulletSpeed;
+    p.bulletRadius = fin.bulletRadius;
+    p.bulletCount = fin.bulletCount;
+    p.critChance = fin.critChance;
+    p.critDamage = fin.critDamage;
+    p.range = fin.range;
+    p.armor = fin.dr;
+    p.invulnTime = b.invulnTime + fin.invuln;
+    p.regen = fin.regen;
+
+    this.mods = md;
+    p.mods = md;
+    this.final = fin;
+    return fin;
+  }
+
+  /* 供投射物使用的效果快照 */
+  shotEffects() { return Object.assign({}, this.mods); }
+
+  /* 该道具参与的所有组合（UI 悬停用） */
+  combosOf(id) {
+    const it = ITEM_BY_ID[id];
+    if (!it) return [];
+    const keys = Object.keys(it.flags || {});
+    const out = [];
+    for (const c of COMBOS) {
+      if (!c.need) continue;
+      for (const k in c.need) if (keys.indexOf(k) >= 0) { out.push(c); break; }
+    }
+    return out;
+  }
+
+  serialize() {
+    return this.slots.map(s => s.id + 'x' + s.n).join(',') + '|' +
+      this.comboList.map(c => c.id).join(',');
+  }
+}
+
+/* ===========================================================
+   抽取：按种子随机，尊重堆叠上限，尽量给没拿过的
+   =========================================================== */
+function pickItem(rng, build, opt) {
+  opt = opt || {};
+  const owned = build || { count: () => 0 };
+  let pool = ITEMS.filter(it => opt.always !== it.id ? true : true);
+  pool = pool.filter(it => owned.count(it.id) < (it.max || 99));
+  if (!pool.length) pool = ITEMS.slice();
+
+  /* 前两件优先给「立刻有感」的输出/机制件 */
+  if (opt.early && pool.length > 3) {
+    const hot = pool.filter(it => it.cat === 'attack' || it.cat === 'proj' || it.cat === 'special');
+    if (hot.length) pool = hot;
+  }
+  /* 三成几率偏向玩家已经投入的方向，帮助成型 */
+  if (opt.synergy && rng.chance(0.35)) {
+    const cats = {};
+    for (const s of (build ? build.slots : [])) {
+      const it = ITEM_BY_ID[s.id];
+      if (it) cats[it.cat] = (cats[it.cat] || 0) + s.n;
+    }
+    let best = null, bestN = 0;
+    for (const k in cats) if (cats[k] > bestN) { bestN = cats[k]; best = k; }
+    if (best) {
+      const same = pool.filter(it => it.cat === best);
+      if (same.length) pool = same;
+    }
+  }
+  return rng.pick(pool);
+}
+
+/* HUD 属性摘要 */
+function playerStatsText(p) {
+  return `伤害 ${p.damage.toFixed(0)} · 射速 ${(1 / p.fireInterval).toFixed(1)}/s · 弹数 ${p.bulletCount}` +
+    ` · 暴击 ${Math.round(p.critChance * 100)}%`;
+}
+
+</script>
+<script>
+/* ===========================================================
+   props.js — 房间内的可交互物件
+   宝箱 / 异象祭坛 / 商栈基座 / 层间裂隙
+   全部原创，材质用 Canvas 绘制
+   =========================================================== */
+'use strict';
+
+class Prop {
+  constructor(game, x, y, opt) {
+    opt = opt || {};
+    this.game = game;
+    this.x = x;
+    this.y = y;
+    this.r = opt.r || 20;
+    this.used = false;
+    this.animT = Math.random() * 6;
+    this.label = opt.label || '交互';
+    this.hint = '';
+  }
+
+  update(dt) { this.animT += dt; }
+
+  inRange(player) {
+    return dist(this.x, this.y, player.x, player.y) < this.r + player.r + 26;
+  }
+
+  use() { if (this.used) return false; this.used = true; return true; }
+
+  /* 底座光环（所有物件共用） */
+  drawBase(ctx, color, alpha) {
+    const t = this.animT;
+    ctx.save();
+    ctx.globalAlpha = alpha === undefined ? 0.35 : alpha;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    const rr = this.r + 8 + Math.sin(t * 2) * 2.5;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, rr, 0, TAU);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* 头顶提示箭头 */
+  drawMarker(ctx, color) {
+    const t = this.animT;
+    const y = this.y - this.r - 20 + Math.sin(t * 3) * 3;
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.85;
+    polygonPath(ctx, [
+      [this.x, y + 10],
+      [this.x - 7, y - 2],
+      [this.x + 7, y - 2]
+    ]);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* -----------------------------------------------------------
+   宝箱（Treasure）
+   ----------------------------------------------------------- */
+class Chest extends Prop {
+  constructor(game, x, y, rng, lesser) {
+    super(game, x, y, { r: 22 });
+    this.rng = rng;
+    this.lesser = !!lesser;
+    /* 道具来自数据驱动的道具表，按房间种子抽取 → 同 Seed 完全一致 */
+    const build = game.player ? game.player.build : null;
+    this.item = pickItem(rng, build, { synergy: true, early: (build ? build.length : 0) < 2 });
+    this.label = '开启宝箱';
+    this.openT = 0;
+  }
+
+  use() {
+    if (!super.use()) return false;
+    const p = this.game.player;
+    const got = p.gainItem(this.item.id);
+    if (!got) return false;                 // 已达堆叠上限
+    this.game.addShake(3);
+    this.game.ui.showBanner(got.name, got.desc, 2.6);
+    this.game.damageNumbers.add(this.x, this.y - 30, this.item.name, {
+      color: this.item.color, life: 1.3, vy: -40
+    });
+    this.game.particles.burst(this.x, this.y, 24, {
+      speed: 200, life: 0.8, size: 5,
+      colors: [this.item.color, '#ffffff', '#ffd35e']
+    });
+    this.game.particles.ring(this.x, this.y, this.item.color, 18, 180);
+    return true;
+  }
+
+  update(dt) {
+    super.update(dt);
+    if (this.used && this.openT < 1) this.openT = Math.min(1, this.openT + dt * 3);
+  }
+
+  draw(ctx) {
+    const t = this.animT;
+    const open = this.openT;
+    const col = this.used ? '#5d6f7e' : this.item.color;
+    this.drawBase(ctx, col, 0.35);
+    if (!this.used) this.drawMarker(ctx, col);
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    const bob = this.used ? 0 : Math.sin(t * 2.2) * 2;
+    ctx.translate(0, bob);
+
+    /* 箱体 */
+    ctx.fillStyle = '#3a2a18';
+    roundRectPath(ctx, -20, -10, 40, 22, 4);
+    ctx.fill();
+    ctx.strokeStyle = '#7a5a2a';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    /* 箱盖（开启时抬起） */
+    ctx.save();
+    ctx.translate(0, -10 - open * 12);
+    ctx.rotate(-open * 0.7);
+    ctx.fillStyle = '#4a3520';
+    roundRectPath(ctx, -21, -14, 42, 16, 6);
+    ctx.fill();
+    ctx.strokeStyle = '#8a6a32';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+
+    /* 锁扣 / 内部光 */
+    if (!this.used) {
+      ctx.fillStyle = '#ffd35e';
+      roundRectPath(ctx, -4, -4, 8, 8, 2);
+      ctx.fill();
+      ctx.globalAlpha = 0.25 + 0.15 * Math.sin(t * 4);
+      ctx.fillStyle = '#ffd35e';
+      ctx.beginPath();
+      ctx.arc(0, 0, 26, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = '#ffd35e';
+      ctx.beginPath();
+      ctx.arc(0, -6, 10, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+}
+
+/* -----------------------------------------------------------
+   异象祭坛（Event）—— 随机正负效果
+   ----------------------------------------------------------- */
+class Shrine extends Prop {
+  constructor(game, x, y, rng) {
+    super(game, x, y, { r: 24 });
+    this.rng = rng;
+    this.label = '触碰异象';
+    this.outcome = this._roll();
+  }
+
+  _roll() {
+    const rng = this.rng;
+    const roll = rng.next();
+    if (roll < 0.30) return { id: 'heal', name: '回响恩泽', desc: '生命完全回复', color: '#7dffb0' };
+    if (roll < 0.55) return { id: 'power', name: '残响灌注', desc: '攻击力 +5，最大生命 -8', color: '#ff8a5c' };
+    if (roll < 0.78) return { id: 'ember', name: '余烬涌流', desc: '获得 14 余烬', color: '#ffd35e' };
+    return { id: 'risk', name: '裂焰契约', desc: '当前生命 -18，暴击率 +15%', color: '#c08bff' };
+  }
+
+  use() {
+    if (!super.use()) return false;
+    const p = this.game.player;
+    const o = this.outcome;
+    if (o.id === 'heal') p.hp = p.maxHp;
+    else if (o.id === 'power') { p.damage += 5; p.maxHp = Math.max(30, p.maxHp - 8); p.hp = Math.min(p.hp, p.maxHp); }
+    else if (o.id === 'ember') this.game.embers += 14;
+    else if (o.id === 'risk') { p.critChance = Math.min(0.7, p.critChance + 0.15); p.takeDamage(18, this.x, this.y + 60); p.invuln = 0; }
+
+    this.game.ui.showBanner(o.name, o.desc, 2.2);
+    this.game.damageNumbers.add(this.x, this.y - 32, o.name, { color: o.color, life: 1.3, vy: -40 });
+    this.game.particles.ring(this.x, this.y, o.color, 20, 200);
+    this.game.addShake(3);
+    return true;
+  }
+
+  update(dt) { super.update(dt); }
+
+  draw(ctx) {
+    const t = this.animT;
+    const col = this.used ? '#5d6f7e' : this.outcome.color;
+    this.drawBase(ctx, col, 0.3);
+    if (!this.used) this.drawMarker(ctx, col);
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+
+    /* 三根立柱 */
+    ctx.strokeStyle = '#2c3446';
+    ctx.lineWidth = 5;
+    for (let i = 0; i < 3; i++) {
+      const a = t * 0.5 + (i / 3) * TAU;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * 16, Math.sin(a) * 8);
+      ctx.lineTo(Math.cos(a) * 16, Math.sin(a) * 8 - 26);
+      ctx.stroke();
+    }
+
+    /* 悬浮晶体 */
+    const fy = -34 + Math.sin(t * 2) * 3;
+    ctx.save();
+    ctx.translate(0, fy);
+    ctx.rotate(t * 0.8);
+    ctx.fillStyle = col;
+    ctx.globalAlpha = this.used ? 0.35 : 0.9;
+    polygonPath(ctx, [[0, -11], [8, 0], [0, 11], [-8, 0]]);
+    ctx.fill();
+    ctx.globalAlpha = 0.3;
+    ctx.beginPath();
+    ctx.arc(0, 0, 18, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.restore();
+  }
+}
+
+/* -----------------------------------------------------------
+   商栈基座（Shop）—— 消耗余烬换取强化
+   ----------------------------------------------------------- */
+class Pedestal extends Prop {
+  constructor(game, x, y, rng, cost) {
+    super(game, x, y, { r: 20 });
+    this.rng = rng;
+    this.cost = cost;
+    this.item = pickItem(rng, game.player ? game.player.build : null, { synergy: true });
+    this.label = `购买 ${cost} 余烬`;
+    this.denyT = 0;
+  }
+
+  canAfford() { return this.game.embers >= this.cost; }
+
+  use() {
+    if (this.used) return false;
+    if (!this.canAfford()) {
+      this.denyT = 0.6;
+      this.game.damageNumbers.add(this.x, this.y - 28, '余烬不足', { color: '#ff7a7a', life: 0.9 });
+      return false;
+    }
+    this.used = true;
+    this.game.embers -= this.cost;
+    const got = this.game.player.gainItem(this.item.id);
+    if (!got) { this.used = false; this.game.embers += this.cost; return false; }
+    this.game.ui.showBanner(got.name, got.desc, 2.6);
+    this.game.damageNumbers.add(this.x, this.y - 30, this.item.name, {
+      color: this.item.color, life: 1.3, vy: -40
+    });
+    this.game.particles.burst(this.x, this.y, 20, {
+      speed: 180, life: 0.7, size: 4, colors: [this.item.color, '#ffffff', '#7fe4ff']
+    });
+    return true;
+  }
+
+  update(dt) {
+    super.update(dt);
+    if (this.denyT > 0) this.denyT -= dt;
+  }
+
+  draw(ctx) {
+    const t = this.animT;
+    const col = this.used ? '#4a5a66' : (this.canAfford() ? this.item.color : '#7a6a5a');
+    this.drawBase(ctx, this.canAfford() && !this.used ? col : '#5d6f7e', 0.32);
+    if (!this.used) this.drawMarker(ctx, col);
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+
+    /* 基座 */
+    ctx.fillStyle = '#1d2531';
+    roundRectPath(ctx, -18, 0, 36, 14, 3);
+    ctx.fill();
+    ctx.strokeStyle = '#3c4a5e';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#161d27';
+    roundRectPath(ctx, -12, -22, 24, 24, 3);
+    ctx.fill();
+    ctx.stroke();
+
+    /* 商品 */
+    if (!this.used) {
+      const fy = -32 + Math.sin(t * 2.4) * 2.5;
+      ctx.save();
+      ctx.translate(0, fy);
+      ctx.rotate(t * 0.9);
+      ctx.fillStyle = this.item.color;
+      ctx.globalAlpha = this.canAfford() ? 1 : 0.45;
+      polygonPath(ctx, [[0, -9], [7, 0], [0, 9], [-7, 0]]);
+      ctx.fill();
+      ctx.restore();
+
+      /* 价格 */
+      ctx.globalAlpha = 1;
+      ctx.font = '800 13px "Segoe UI", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = this.canAfford() ? '#ffd35e' : '#ff7a7a';
+      ctx.fillText('◈' + this.cost, 0, 26);
+    } else {
+      ctx.globalAlpha = 0.4;
+      ctx.fillStyle = '#5d6f7e';
+      ctx.beginPath(); ctx.arc(0, -18, 8, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+}
+
+/* -----------------------------------------------------------
+   层间裂隙（Boss 房通关后出现）
+   ----------------------------------------------------------- */
+class Portal extends Prop {
+  constructor(game, x, y) {
+    super(game, x, y, { r: 30 });
+    this.label = '进入下一层';
+  }
+
+  use() {
+    if (!super.use()) return false;
+    this.game.particles.burst(this.x, this.y, 40, {
+      speed: 300, life: 1.0, size: 5, colors: ['#ffd35e', '#ff8a5c', '#ffffff', '#7fe4ff']
+    });
+    this.game.nextFloor();
+    return true;
+  }
+
+  draw(ctx) {
+    const t = this.animT;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+
+    /* 外圈旋转符环 */
+    ctx.strokeStyle = 'rgba(255,200,110,0.55)';
+    ctx.lineWidth = 2.5;
+    for (let i = 0; i < 3; i++) {
+      const a0 = t * (0.8 + i * 0.4) + (i / 3) * TAU;
+      ctx.beginPath();
+      ctx.arc(0, 0, 30 + i * 9, a0, a0 + Math.PI * 1.2);
+      ctx.stroke();
+    }
+
+    /* 裂隙核心 */
+    const g = ctx.createRadialGradient(0, 0, 2, 0, 0, 34);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.35, '#ffd35e');
+    g.addColorStop(1, 'rgba(255,140,60,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, 34 + Math.sin(t * 3) * 3, 0, TAU);
+    ctx.fill();
+
+    ctx.restore();
+    this.drawBase(ctx, '#ffd35e', 0.4);
+  }
+}
+
+</script>
+<script>
+/* ===========================================================
    enemy.js — 敌人基类 + 三种原创敌人（各自独立 AI）
      1. 灰噬体  Chaser  ：持续追踪 + 扑击近战
      2. 棱目    Shooter ：保持距离 + 预判弹幕
@@ -1078,16 +2513,87 @@ class Enemy {
     this.name = cfg.name;
     this.colors = cfg.colors;
     this.mass = cfg.mass || 1;
+    /* 每只敌人自带 Rng：行为随机也进入种子体系（相同 Seed → 相同战斗） */
+    this.rng = cfg.rng || new Rng(Math.floor(Math.random() * 0x7fffffff));
 
     this.dead = false;
     this.touchTimer = 0;
     this.hitFlash = 0;
-    this.animT = rand(0, 10);
-    this.face = rand(0, TAU);
+    this.animT = this.rng.range(0, 10);
+    this.face = this.rng.range(0, TAU);
 
     this.spawnT = 0;
     this.spawnDur = 0.5;
     this.spawned = false;            // 出场动画完成
+
+    /* ---- 状态效果（由道具施加） ---- */
+    this.burnT = 0; this.burnStack = 0;
+    this.poisonT = 0; this.poisonStack = 0;
+    this.freezeT = 0;
+    this.slowT = 0; this.slowStack = 0;
+    this.baseSpeed = this.speed;
+    this.dotAcc = 0;
+  }
+
+  /* 施加状态：kind = burn | poison | freeze | slow，level = 层数 */
+  applyStatus(kind, level) {
+    if (this.dead || level <= 0) return;
+    if (kind === 'burn') { this.burnStack = Math.min(9, this.burnStack + level); this.burnT = 3.0; }
+    else if (kind === 'poison') { this.poisonStack = Math.min(12, this.poisonStack + level); this.poisonT = 4.0; }
+    else if (kind === 'freeze') { this.freezeT = Math.max(this.freezeT, 0.8 + 0.25 * level); }
+    else if (kind === 'slow') { this.slowStack = Math.min(5, this.slowStack + level); this.slowT = Math.max(this.slowT, 1.6); }
+  }
+
+  hasStatus() {
+    return this.burnT > 0 || this.poisonT > 0 || this.freezeT > 0 || this.slowT > 0;
+  }
+
+  /* 持续伤害（不触发击退与受击闪白） */
+  takeDot(amount, healer) {
+    if (this.dead || amount <= 0) return;
+    this.hp -= amount;
+    if (healer && healer.build) {
+      const m = healer.mods || {};
+      if (m.dotVamp > 0) healer.hp = Math.min(healer.maxHp, healer.hp + amount * 0.10);
+    }
+    if (this.hp <= 0) { this.hp = 0; this.die(); }
+  }
+
+  _updateStatus(dt) {
+    if (this.burnT > 0) this.burnT -= dt; else this.burnStack = 0;
+    if (this.poisonT > 0) this.poisonT -= dt; else this.poisonStack = 0;
+    if (this.freezeT > 0) this.freezeT -= dt;
+    if (this.slowT > 0) this.slowT -= dt; else this.slowStack = 0;
+
+    const dps = this.burnStack * 3.2 + this.poisonStack * 2.4;
+    if (dps > 0) {
+      this.dotAcc += dps * dt;
+      if (this.dotAcc >= 1) {
+        const tick = Math.floor(this.dotAcc);
+        this.dotAcc -= tick;
+        this.takeDot(tick, this.game.player);
+        if (Math.random() < 0.5) {
+          this.game.particles.spawn(
+            this.x + rand(-this.r, this.r), this.y + rand(-this.r, this.r),
+            rand(-20, 20), rand(-50, -20), rand(0.3, 0.6), rand(2, 3.4),
+            this.burnStack >= this.poisonStack ? '#ff9d3c' : '#9ad14f', { drag: 2 }
+          );
+        }
+      }
+    }
+
+    /* 速度倍率：冰冻结死，减速按比例 */
+    const slowMul = this.slowT > 0 ? Math.max(0.4, 1 - 0.15 * this.slowStack) : 1;
+    this.speed = this.baseSpeed * (this.freezeT > 0 ? 0 : slowMul);
+
+    /* 极寒领域：被冻结/减速的敌人向外散发寒气 */
+    if (this.game.player && this.game.player.mods &&
+        this.game.player.mods.frostField > 0 && (this.freezeT > 0 || this.slowT > 0)) {
+      for (const o of this.game.room.enemies) {
+        if (o === this || o.dead) continue;
+        if (dist2(this.x, this.y, o.x, o.y) < 110 * 110) o.applyStatus('slow', 1);
+      }
+    }
   }
 
   get spawnScale() {
@@ -1102,6 +2608,7 @@ class Enemy {
     this.hp = this.maxHp;
     this.touchDamage = Math.round(this.touchDamage * dmgMul);
     this.speed *= spdMul;
+    this.baseSpeed = this.speed;
     this.tier = tier;
   }
 
@@ -1119,6 +2626,20 @@ class Enemy {
     /* 出场动画期间不行动 */
     if (!this.spawned) {
       this.vx = 0; this.vy = 0;
+      return;
+    }
+
+    this._updateStatus(dt);
+    if (this.dead) return;
+
+    /* 冻结：完全停止行动（移动与攻击都被冻住） */
+    if (this.freezeT > 0) {
+      this.vx = 0; this.vy = 0;
+      const kd = Math.max(0, 1 - 9 * dt);
+      this.kx *= kd; this.ky *= kd;
+      this.x += this.kx * dt;
+      this.y += this.ky * dt;
+      this.game.room.clampEntity(this, false);
       return;
     }
 
@@ -1142,9 +2663,17 @@ class Enemy {
     if (!p || p.dead) return false;
     const reach = this.r + p.r + (extraRange || 2);
     if (dist2(this.x, this.y, p.x, p.y) <= reach * reach) {
-      p.takeDamage(amount, this.x, this.y);
+      const hurt = p.takeDamage(amount, this.x, this.y);
       this.touchTimer = this.touchInterval;
-      return true;
+      /* 烬刺外皮：近身接触时反弹伤害 */
+      const th = (p.mods && p.mods.thorns) || 0;
+      if (th > 0) {
+        this.takeDamage(th * 10, p.x, p.y);
+        this.game.particles.burst(this.x, this.y, 6, {
+          speed: 160, life: 0.3, size: 3, color: '#c8ff6a'
+        });
+      }
+      return hurt;
     }
     return false;
   }
@@ -1251,7 +2780,7 @@ class Enemy {
    不断追踪玩家；靠近后短暂缩身蓄力，然后高速扑击
    =========================================================== */
 class Chaser extends Enemy {
-  constructor(game, x, y) {
+  constructor(game, x, y, rng) {
     super(game, x, y, {
       name: '灰噬体',
       r: 16,
@@ -1260,14 +2789,15 @@ class Chaser extends Enemy {
       touchDamage: 7,
       touchInterval: 0.75,
       mass: 1,
+      rng: rng,
       colors: ['#53655a', '#c8ff6a', '#9ad14f']
     });
     this.lungeDamage = 12;
     this.state = 'chase';
     this.stateT = 0;
-    this.lungeCd = rand(0.4, 1.4);
+    this.lungeCd = this.rng.range(0.4, 1.4);
     this.lungeDir = 0;
-    this.wob = rand(0, TAU);
+    this.wob = this.rng.range(0, TAU);
   }
 
   applyTier(tier) {
@@ -1302,7 +2832,7 @@ class Chaser extends Enemy {
         this.lungeDir = angleTo(this.x, this.y, p.x, p.y);
         this.state = 'lunge';
         this.stateT = 0.26;
-        this.lungeCd = rand(1.5, 2.4);
+        this.lungeCd = this.rng.range(1.5, 2.4);
         this.game.particles.burst(this.x, this.y, 6, {
           speed: 90, life: 0.3, size: 3, color: '#c8ff6a', dir: this.lungeDir + Math.PI, spread: 1.5
         });
@@ -1389,7 +2919,7 @@ class Chaser extends Enemy {
    维持中距离，横向游走，蓄能后射出三连棱晶
    =========================================================== */
 class Shooter extends Enemy {
-  constructor(game, x, y) {
+  constructor(game, x, y, rng) {
     super(game, x, y, {
       name: '棱目',
       r: 18,
@@ -1398,17 +2928,18 @@ class Shooter extends Enemy {
       touchDamage: 5,
       touchInterval: 1.0,
       mass: 0.85,
+      rng: rng,
       colors: ['#3a4a66', '#7fe4ff', '#5aa9ff']
     });
     this.keepMin = 190;
     this.keepMax = 330;
-    this.strafeDir = chance(0.5) ? 1 : -1;
-    this.strafeT = rand(0.8, 1.8);
-    this.cd = rand(0.7, 1.5);
+    this.strafeDir = this.rng.chance(0.5) ? 1 : -1;
+    this.strafeT = this.rng.range(0.8, 1.8);
+    this.cd = this.rng.range(0.7, 1.5);
     this.aimT = 0;               // 蓄能进度 0..1
     this.aiming = false;
     this.bulletDamage = 8;
-    this.bob = rand(0, TAU);
+    this.bob = this.rng.range(0, TAU);
   }
 
   applyTier(tier) {
@@ -1431,7 +2962,7 @@ class Shooter extends Enemy {
       mx = Math.cos(toP); my = Math.sin(toP);         // 靠近
     } else {
       this.strafeT -= dt;
-      if (this.strafeT <= 0) { this.strafeDir *= -1; this.strafeT = rand(1.0, 2.2); }
+      if (this.strafeT <= 0) { this.strafeDir *= -1; this.strafeT = this.rng.range(1.0, 2.2); }
       mx = Math.cos(toP + Math.PI / 2) * this.strafeDir;
       my = Math.sin(toP + Math.PI / 2) * this.strafeDir;
     }
@@ -1452,7 +2983,7 @@ class Shooter extends Enemy {
       if (this.aimT >= 1) {
         this.fire();
         this.aiming = false;
-        this.cd = rand(1.6, 2.4);
+        this.cd = this.rng.range(1.6, 2.4);
       }
     }
 
@@ -1571,7 +3102,7 @@ class Shooter extends Enemy {
    缓慢逼近 → 原地蓄力（带预警线）→ 高速直线冲锋 → 硬直
    =========================================================== */
 class Charger extends Enemy {
-  constructor(game, x, y) {
+  constructor(game, x, y, rng) {
     super(game, x, y, {
       name: '锥锋',
       r: 19,
@@ -1580,10 +3111,11 @@ class Charger extends Enemy {
       touchDamage: 15,
       touchInterval: 0.9,
       mass: 1.5,
+      rng: rng,
       colors: ['#6b2f3a', '#ff6b5c', '#ff3b57']
     });
     this.state = 'stalk';
-    this.stateT = rand(0.5, 1.2);
+    this.stateT = this.rng.range(0.5, 1.2);
     this.dashDir = 0;
     this.dashSpeed = 760;
     this.lastX = x;
@@ -1673,7 +3205,7 @@ class Charger extends Enemy {
       this.vx *= 0.86; this.vy *= 0.86;
       if (this.stateT <= 0) {
         this.state = 'stalk';
-        this.stateT = rand(0.9, 1.7);
+        this.stateT = this.rng.range(0.9, 1.7);
       }
     }
   }
@@ -1765,16 +3297,271 @@ class Charger extends Enemy {
 }
 
 /* ===========================================================
+   4. 回廊守望者 · Warden（Boss）
+   三形态：环形弹幕 / 旋转螺旋弹 / 蓄力冲撞，血量阈值召唤残形
+   =========================================================== */
+class Warden extends Enemy {
+  constructor(game, x, y, rng) {
+    super(game, x, y, {
+      name: '回廊守望者',
+      r: 34,
+      hp: 460,
+      speed: 88,
+      touchDamage: 16,
+      touchInterval: 0.8,
+      mass: 6,
+      rng: rng,
+      colors: ['#4a2b52', '#ff6bd0', '#ff4d6b']
+    });
+    this.isBoss = true;
+    this.phase = 1;
+    this.state = 'hover';
+    this.stateT = this.rng.range(0.6, 1.2);
+    this.cd = 1.4;
+    this.spiralAngle = this.rng.range(0, TAU);
+    this.spiralShots = 0;
+    this.ringLeft = 0;
+    this.dashDir = 0;
+    this.spin = 0;
+    this.summoned = 0;
+  }
+
+  _bullet(angle, speed, r, damage) {
+    return {
+      x: this.x + Math.cos(angle) * (this.r + 8),
+      y: this.y + Math.sin(angle) * (this.r + 8),
+      angle: angle,
+      speed: speed,
+      damage: damage,
+      r: r || 7,
+      friendly: false,
+      color: '#ff6bd0',
+      core: '#ffe0f5',
+      life: 4.0,
+      spin: 6
+    };
+  }
+
+  _ring(count, speed, offset) {
+    for (let i = 0; i < count; i++) {
+      const a = offset + (i / count) * TAU;
+      this.game.spawnProjectile(this._bullet(a, speed, 7, 9));
+    }
+    this.game.particles.ring(this.x, this.y, '#ff6bd0', count, 220);
+  }
+
+  onUpdate(dt) {
+    const p = this.game.player;
+    const d = dist(this.x, this.y, p.x, p.y);
+    this.spin += dt * 0.9;
+
+    /* 形态切换 */
+    const ratio = this.hp / this.maxHp;
+    const wantPhase = ratio > 0.66 ? 1 : (ratio > 0.33 ? 2 : 3);
+    if (wantPhase !== this.phase) {
+      this.phase = wantPhase;
+      this.state = 'hover';
+      this.stateT = 0.7;
+      this.game.addShake(10);
+      this.game.particles.ring(this.x, this.y, '#ff4d6b', 30, 280);
+      this.game.ui.showBanner('守望者 · 形态 ' + wantPhase, '回廊开始崩解', 1.4);
+      /* 召唤残形 */
+      const n = wantPhase === 2 ? 2 : 3;
+      for (let i = 0; i < n; i++) {
+        const room = this.game.room;
+        if (room && this.summoned < 8) {
+          const e = room._spawnEnemy(wantPhase === 3 && i === 0 ? 'charger' : 'chaser');
+          if (e) { e.spawnT = e.spawnDur * 0.6; this.summoned++; }
+        }
+      }
+    }
+
+    const speedMul = 1 + (this.phase - 1) * 0.35;
+
+    if (this.state === 'hover') {
+      /* 缓慢逼近并保持中距 */
+      const a = angleTo(this.x, this.y, p.x, p.y);
+      const sp = this.speed * speedMul * (d > 300 ? 1 : (d < 200 ? -0.5 : 0.25));
+      this.face = angleLerp(this.face, a, Math.min(1, 3 * dt));
+      this.vx = Math.cos(a) * Math.max(0, sp) + Math.cos(a + Math.PI / 2) * 40 * Math.sin(this.animT * 1.2);
+      this.vy = Math.sin(a) * Math.max(0, sp) + Math.sin(a + Math.PI / 2) * 40 * Math.sin(this.animT * 1.2);
+      this.tryTouchDamage(this.touchDamage);
+
+      this.stateT -= dt;
+      if (this.stateT <= 0) {
+        const roll = this.rng.next();
+        if (roll < 0.36) { this.state = 'ring'; this.stateT = 0.55; this.ringLeft = this.phase >= 2 ? 3 : 2; }
+        else if (roll < 0.68) { this.state = 'spiral'; this.stateT = 1.5; this.spiralShots = 0; }
+        else { this.state = 'windup'; this.stateT = 0.6; }
+      }
+    } else if (this.state === 'ring') {
+      this.stateT -= dt;
+      this.vx *= 0.85; this.vy *= 0.85;
+      if (this.stateT <= 0) {
+        this._ring(this.phase >= 3 ? 18 : 14, 250, this.rng.range(0, TAU));
+        this.game.addShake(3);
+        this.ringLeft--;
+        if (this.ringLeft > 0) this.stateT = 0.28;
+        else { this.state = 'hover'; this.stateT = 0.9; }
+      }
+    } else if (this.state === 'spiral') {
+      this.stateT -= dt;
+      this.vx *= 0.9; this.vy *= 0.9;
+      this.spiralAngle += dt * 3.4 * speedMul;
+      this.spiralShots -= dt;
+      if (this.spiralShots <= 0) {
+        this.spiralShots = 0.075;
+        for (let i = 0; i < (this.phase >= 2 ? 3 : 2); i++) {
+          const a = this.spiralAngle + (i / (this.phase >= 2 ? 3 : 2)) * TAU;
+          this.game.spawnProjectile(this._bullet(a, 300, 6, 8));
+        }
+      }
+      if (this.stateT <= 0) { this.state = 'hover'; this.stateT = 1.0; }
+    } else if (this.state === 'windup') {
+      this.stateT -= dt;
+      this.vx *= 0.8; this.vy *= 0.8;
+      this.face = angleLerp(this.face, angleTo(this.x, this.y, p.x, p.y), Math.min(1, 6 * dt));
+      if (Math.random() < dt * 30) {
+        this.game.particles.spawn(this.x + rand(-24, 24), this.y + rand(-24, 24),
+          rand(-40, 40), rand(-40, 40), rand(0.2, 0.45), rand(3, 6),
+          'rgba(255,90,170,0.55)', { drag: 3 });
+      }
+      if (this.stateT <= 0) {
+        this.dashDir = angleTo(this.x, this.y, p.x, p.y);
+        this.state = 'dash';
+        this.stateT = 0.5;
+        this.game.addShake(4);
+      }
+    } else if (this.state === 'dash') {
+      this.stateT -= dt;
+      this.face = this.dashDir;
+      const sp = 620 * speedMul;
+      this.vx = Math.cos(this.dashDir) * sp;
+      this.vy = Math.sin(this.dashDir) * sp;
+      if (Math.random() < dt * 50) {
+        this.game.particles.trail(this.x, this.y, 'rgba(255,90,170,0.35)', 12);
+      }
+      this.tryTouchDamage(Math.round(this.touchDamage * 1.4), 6);
+      if (this.stateT <= 0) { this.state = 'hover'; this.stateT = 1.1; }
+    }
+  }
+
+  onDraw(ctx) {
+    const t = this.animT;
+    const winding = this.state === 'windup';
+    const dashing = this.state === 'dash';
+
+    /* 蓄力预警 */
+    if (winding) {
+      const g = 1 - this.stateT / 0.6;
+      ctx.save();
+      ctx.rotate(this.face);
+      ctx.globalAlpha = 0.25 + 0.45 * g;
+      ctx.strokeStyle = '#ff4d6b';
+      ctx.lineWidth = 3 + 3 * g;
+      ctx.setLineDash([16, 12]);
+      ctx.lineDashOffset = -t * 70;
+      ctx.beginPath();
+      ctx.moveTo(this.r, 0);
+      ctx.lineTo(this.r + 600 * (0.4 + 0.6 * g), 0);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    /* 外环旋转护板 */
+    ctx.save();
+    ctx.rotate(this.spin);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * TAU;
+      ctx.save();
+      ctx.rotate(a);
+      ctx.fillStyle = i % 2 ? '#5c3566' : '#3b2244';
+      polygonPath(ctx, [
+        [this.r + 16, -9],
+        [this.r + 30, 0],
+        [this.r + 16, 9],
+        [this.r + 4, 0]
+      ]);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,107,208,0.5)';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
+
+    /* 主体 */
+    ctx.save();
+    if (winding) ctx.translate(rand(-2, 2), rand(-2, 2));
+    const pulse = 1 + Math.sin(t * 2.4) * 0.04;
+    ctx.scale(pulse, pulse);
+
+    const g = ctx.createRadialGradient(0, 0, 4, 0, 0, this.r * 1.5);
+    g.addColorStop(0, '#ffd0ee');
+    g.addColorStop(0.35, '#ff6bd0');
+    g.addColorStop(1, 'rgba(74,43,82,0.15)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, this.r * 1.05, 0, TAU);
+    ctx.fill();
+
+    ctx.fillStyle = this.colors[0];
+    ctx.beginPath();
+    ctx.arc(0, 0, this.r * 0.78, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = '#ff6bd0';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    /* 三只眼（形态越多睁得越多） */
+    for (let i = 0; i < 3; i++) {
+      const open = i < this.phase;
+      const a = -Math.PI / 2 + (i - 1) * 0.7;
+      const ex = Math.cos(a) * this.r * 0.4;
+      const ey = Math.sin(a) * this.r * 0.4;
+      ctx.fillStyle = open ? '#fff0fb' : '#2b1b30';
+      ctx.beginPath();
+      ctx.ellipse(ex, ey, 7, open ? 6 : 2, a, 0, TAU);
+      ctx.fill();
+      if (open) {
+        ctx.fillStyle = '#ff2d6b';
+        const pa = angleTo(ex, ey, this.game.player.x - this.x, this.game.player.y - this.y);
+        ctx.beginPath();
+        ctx.arc(ex + Math.cos(pa) * 2.2, ey + Math.sin(pa) * 2.2, 3, 0, TAU);
+        ctx.fill();
+      }
+    }
+
+    /* 核心裂纹（血量越低越亮） */
+    const hurt = 1 - this.hp / this.maxHp;
+    ctx.globalAlpha = 0.3 + hurt * 0.6;
+    ctx.strokeStyle = dashing ? '#ffffff' : '#ff4d6b';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+      const a = t * 0.6 + (i / 4) * TAU;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * 8, Math.sin(a) * 8);
+      ctx.lineTo(Math.cos(a) * this.r * 0.7, Math.sin(a) * this.r * 0.7);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+}
+
+/* ===========================================================
    敌人工厂
    =========================================================== */
 const EnemyFactory = {
-  create(game, type, x, y, tier) {
+  create(game, type, x, y, tier, rng) {
     let e;
     switch (type) {
-      case 'shooter': e = new Shooter(game, x, y); break;
-      case 'charger': e = new Charger(game, x, y); break;
+      case 'shooter': e = new Shooter(game, x, y, rng); break;
+      case 'charger': e = new Charger(game, x, y, rng); break;
+      case 'boss': e = new Warden(game, x, y, rng); break;
       case 'chaser':
-      default: e = new Chaser(game, x, y); break;
+      default: e = new Chaser(game, x, y, rng); break;
     }
     e.type = type;
     e.applyTier(tier || 0);
@@ -1785,42 +3572,366 @@ const EnemyFactory = {
 </script>
 <script>
 /* ===========================================================
-   room.js — 固定尺寸战斗房
-   进入：门关闭 + 生成敌人 + 玩家无法离开
-   清空：门打开 + 提示 Room Clear
+   map.js — 程序生成的房间地图（网格 / 节点结构）
+   - Start 房固定
+   - Boss 房位于地图末端
+   - 所有房间由「从已有房间生长」产生 → 天然连通，无孤立房间
+   - 相同 Seed + 相同层数 → 完全相同地图
+   =========================================================== */
+'use strict';
+
+const ROOM_TYPE = {
+  START: 'start',
+  COMBAT: 'combat',
+  TREASURE: 'treasure',
+  ELITE: 'elite',
+  SHOP: 'shop',
+  EVENT: 'event',
+  BOSS: 'boss'
+};
+
+const ROOM_META = {
+  start:    { cn: '起点',   color: '#7dffb0', glyph: 'S' },
+  combat:   { cn: '战斗',   color: '#8fa3b5', glyph: '·' },
+  treasure: { cn: '宝库',   color: '#ffd35e', glyph: 'T' },
+  elite:    { cn: '精英',   color: '#ff8a5c', glyph: 'E' },
+  shop:     { cn: '商栈',   color: '#7fe4ff', glyph: '$' },
+  event:    { cn: '异象',   color: '#c08bff', glyph: '?' },
+  boss:     { cn: '守望者', color: '#ff4d6b', glyph: 'B' }
+};
+
+const DIRS = [
+  { side: 'top', dc: 0, dr: -1 },
+  { side: 'bottom', dc: 0, dr: 1 },
+  { side: 'left', dc: -1, dr: 0 },
+  { side: 'right', dc: 1, dr: 0 }
+];
+
+class GameMap {
+  constructor(seed, floor) {
+    this.seed = seed;
+    this.floor = floor || 1;
+    this.rng = new Rng(hashSeed(seed) ^ hashSeed('floor:' + this.floor));
+    this.cols = 0;
+    this.rows = 0;
+    this.cells = [];
+    this.grid = {};        // key "c,r" -> cell
+    this.visited = {};
+    this.current = null;
+    this.start = null;
+    this.boss = null;
+    this.generate();
+  }
+
+  /* ---------------------------------------------------------
+     生成
+     --------------------------------------------------------- */
+  generate() {
+    const rng = this.rng;
+    this.cols = clamp(5 + Math.floor(this.floor / 3), 5, 7);
+    this.rows = 5;
+    const cols = this.cols, rows = this.rows;
+
+    /* 1. 起点固定在最左列（纵向居中附近） */
+    const startR = rows >= 5 ? 2 + rng.int(-1, 1) : Math.floor(rows / 2);
+    const start = this._add(0, clamp(startR, 0, rows - 1));
+    this.start = start;
+    start.type = ROOM_TYPE.START;
+
+    /* 2. 主路径：从起点一路向右生长到最右列 → 末端即 Boss */
+    let cur = start;
+    let guard = 0;
+    const mainPath = [start];
+    while (cur.c < cols - 1 && guard++ < 200) {
+      /* 先在当前列纵向游走 0~2 格，再向右推进一格。
+         注意：纵向漂移必须在「尚未进入最右列」时完成，
+         否则会在最右列留下比 Boss 更远的房间，破坏 Boss 的末端性。 */
+      const vSteps = rng.int(0, 2);
+      const vDir = rng.chance(0.5) ? -1 : 1;
+      for (let i = 0; i < vSteps; i++) {
+        const nr = cur.r + vDir;
+        if (nr < 0 || nr >= rows) break;
+        cur = this._add(cur.c, nr);
+        mainPath.push(cur);
+      }
+      /* 向右推进（最后一次推进一定落在最右列，其后不再漂移 → 末端即 Boss） */
+      cur = this._add(cur.c + 1, cur.r);
+      mainPath.push(cur);
+    }
+
+    /* 3. Boss = 主路径末端（一定在最右列） */
+    this.boss = cur;
+    cur.type = ROOM_TYPE.BOSS;
+
+    /* 4. 分支：从主路径上的房间长出 2~4 条短支线 */
+    const branchCount = clamp(2 + rng.int(0, 2), 2, 4);
+    const branchRoots = rng.shuffle(mainPath.slice(0, Math.max(1, mainPath.length - 1)));
+    let made = 0;
+    for (let i = 0; i < branchRoots.length && made < branchCount; i++) {
+      const root = branchRoots[i];
+      if (root === this.start || root === this.boss) continue;
+      /* 支线不从末端附近长出，保证 Boss 房始终是地图尽头 */
+      if (root.c >= this.boss.c - 1) continue;
+      const len = rng.int(1, 2);
+      let node = root;
+      for (let s = 0; s < len; s++) {
+        const dirs = rng.shuffle(DIRS);
+        let placed = null;
+        for (const d of dirs) {
+          const nc = node.c + d.dc, nr = node.r + d.dr;
+          if (nc < 0 || nc >= cols || nr < 0 || nr >= rows) continue;
+          if (this.grid[nc + ',' + nr]) continue;
+          if (nc >= this.boss.c) continue;          // 不越过 Boss 所在列
+          /* 支线房间只能挂在自己父节点上：避免支线互相粘连后比 Boss 更远 */
+          let otherNeighbors = 0;
+          for (const dd of DIRS) {
+            const nb = this.grid[(nc + dd.dc) + ',' + (nr + dd.dr)];
+            if (nb && nb !== node) otherNeighbors++;
+          }
+          if (otherNeighbors > 0) continue;
+          placed = this._add(nc, nr);
+          break;
+        }
+        if (!placed) break;
+        node = placed;
+      }
+      made++;
+    }
+
+    /* 5. 分配房间类型 */
+    this._assignTypes(mainPath);
+
+    /* 6. 建立连接（四方向相邻即连通） */
+    this._linkAll();
+
+    /* 7. 保险：确保 Boss 一定是离 Start 最远的房间（末端） */
+    this._ensureBossTerminal();
+  }
+
+  /* BFS 距离表（以 Start 为原点） */
+  distancesFromStart() {
+    const d = {};
+    d[this.start.c + ',' + this.start.r] = 0;
+    const q = [this.start];
+    while (q.length) {
+      const cur = q.shift();
+      for (const dir of DIRS) {
+        const n = cur.links[dir.side];
+        if (!n) continue;
+        const k = n.c + ',' + n.r;
+        if (d[k] !== undefined) continue;
+        d[k] = d[cur.c + ',' + cur.r] + 1;
+        q.push(n);
+      }
+    }
+    return d;
+  }
+
+  /* 若存在比 Boss 更远的房间，整批剪掉。
+     安全性说明：BFS 最短路经过的中间房间距离严格递减，
+     因此「距离 > Boss 距离」的房间被删除后，剩下的房间仍全部连通（无孤立）。 */
+  _ensureBossTerminal() {
+    for (let pass = 0; pass < 12; pass++) {
+      const d = this.distancesFromStart();
+      const bd = d[this.boss.c + ',' + this.boss.r];
+      const doomed = this.cells.filter(c => {
+        if (c === this.boss || c === this.start) return false;
+        const dd = d[c.c + ',' + c.r];
+        return dd === undefined || dd > bd;      // 不可达 或 比 Boss 更远
+      });
+      if (!doomed.length) break;
+      for (const cell of doomed) {
+        delete this.grid[cell.c + ',' + cell.r];
+        const idx = this.cells.indexOf(cell);
+        if (idx >= 0) this.cells.splice(idx, 1);
+      }
+      this._linkAll();
+    }
+  }
+
+  _add(c, r) {
+    const key = c + ',' + r;
+    if (this.grid[key]) return this.grid[key];
+    const cell = {
+      id: this.cells.length,
+      c: c, r: r,
+      type: ROOM_TYPE.COMBAT,
+      links: {},             // side -> cell
+      branch: false
+    };
+    this.grid[key] = cell;
+    this.cells.push(cell);
+    return cell;
+  }
+
+  _assignTypes(mainPath) {
+    const rng = this.rng;
+
+    /* 主路径（含起点/Boss）上的中间房间：多为战斗，偶尔精英 / 异象 */
+    for (const cell of mainPath) {
+      if (cell === this.start || cell === this.boss) continue;
+      const roll = rng.next();
+      if (roll < 0.16) cell.type = ROOM_TYPE.ELITE;
+      else if (roll < 0.30) cell.type = ROOM_TYPE.EVENT;
+      else cell.type = ROOM_TYPE.COMBAT;
+    }
+
+    /* 支线房间：宝库 / 商栈 / 异象为主 */
+    const branches = this.cells.filter(c => c !== this.start && c !== this.boss &&
+      !mainPath.includes(c));
+    const shuffled = rng.shuffle(branches);
+
+    /* 保证：至少一间宝库；房间多时保证一间商栈 */
+    const want = [];
+    want.push(ROOM_TYPE.TREASURE);
+    if (shuffled.length >= 3) want.push(ROOM_TYPE.SHOP);
+    if (shuffled.length >= 5) want.push(ROOM_TYPE.TREASURE);
+    if (this.floor >= 2 && shuffled.length >= 4) want.push(ROOM_TYPE.ELITE);
+
+    for (let i = 0; i < shuffled.length; i++) {
+      const cell = shuffled[i];
+      if (i < want.length) {
+        cell.type = want[i];
+      } else {
+        const roll = rng.next();
+        if (roll < 0.34) cell.type = ROOM_TYPE.TREASURE;
+        else if (roll < 0.56) cell.type = ROOM_TYPE.EVENT;
+        else if (roll < 0.78) cell.type = ROOM_TYPE.ELITE;
+        else cell.type = ROOM_TYPE.COMBAT;
+      }
+      cell.branch = true;
+    }
+
+    /* 兜底：如果没有宝库（支线太少），把某个非 Boss 战斗房改成宝库 */
+    if (!this.cells.some(c => c.type === ROOM_TYPE.TREASURE)) {
+      const cand = this.cells.filter(c => c !== this.start && c !== this.boss &&
+        c.type === ROOM_TYPE.COMBAT);
+      if (cand.length) cand[rng.int(0, cand.length - 1)].type = ROOM_TYPE.TREASURE;
+    }
+  }
+
+  _linkAll() {
+    for (const cell of this.cells) {
+      cell.links = {};
+      for (const d of DIRS) {
+        const n = this.grid[(cell.c + d.dc) + ',' + (cell.r + d.dr)];
+        if (n) cell.links[d.side] = n;
+      }
+    }
+  }
+
+  /* ---------------------------------------------------------
+     查询
+     --------------------------------------------------------- */
+  connectionsOf(cell) {
+    return {
+      top: !!cell.links.top,
+      bottom: !!cell.links.bottom,
+      left: !!cell.links.left,
+      right: !!cell.links.right
+    };
+  }
+
+  neighbor(cell, side) { return cell.links[side] || null; }
+
+  visit(cell) {
+    this.visited[cell.c + ',' + cell.r] = true;
+  }
+
+  isVisited(cell) { return !!this.visited[cell.c + ',' + cell.r]; }
+
+  typeCount(type) {
+    let n = 0;
+    for (const c of this.cells) if (c.type === type) n++;
+    return n;
+  }
+
+  /* 从 Start 做 BFS，返回可达集合 —— 用于自检 */
+  reachableFromStart() {
+    const seen = {};
+    const q = [this.start];
+    seen[this.start.c + ',' + this.start.r] = true;
+    while (q.length) {
+      const cur = q.shift();
+      for (const d of DIRS) {
+        const n = cur.links[d.side];
+        if (!n) continue;
+        const k = n.c + ',' + n.r;
+        if (seen[k]) continue;
+        seen[k] = true;
+        q.push(n);
+      }
+    }
+    return seen;
+  }
+
+  /* 用于测试与「同种子一致性」比对 */
+  serialize() {
+    const cells = this.cells.slice().sort((a, b) => (a.c - b.c) || (a.r - b.r))
+      .map(c => `${c.c},${c.r}:${c.type}:${Object.keys(c.links).sort().join('')}`);
+    return `seed=${this.seed};floor=${this.floor};size=${this.cols}x${this.rows};` + cells.join('|');
+  }
+}
+
+</script>
+<script>
+/* ===========================================================
+   room.js — 战斗房（固定尺寸竞技场）
+   扩展：房间类型（Start / Combat / Treasure / Elite / Shop / Event / Boss）
+   - 只有与其它房间相连的方向才有门
+   - 战斗类房间：进入关门 → 生成敌人 → 清空后开门
+   - 非战斗房间：门常开，放置可交互物件
    =========================================================== */
 'use strict';
 
 class Room {
-  constructor(game, index) {
+  constructor(game, opts) {
+    opts = opts || {};
     this.game = game;
-    this.index = index;
+    this.def = opts.def || { id: 0, c: 0, r: 0, type: ROOM_TYPE.COMBAT };
+    this.type = this.def.type || ROOM_TYPE.COMBAT;
+    this.index = opts.index || 0;
+    this.depth = opts.depth || 0;
+    this.tier = opts.tier || 0;
+    this.connections = opts.connections || { top: true, bottom: true, left: true, right: true };
+    this.rng = opts.rng || new Rng(1);
+    this.roomSeed = opts.roomSeed || '';
 
     this.enemies = [];
+    this.props = [];
     this.pending = [];
     this.waves = [];
     this.waveIndex = 0;
     this.waveTimer = 0.9;
 
-    this.state = 'fighting';   // 'fighting' | 'clear'
+    this.isCombatRoom = (this.type === ROOM_TYPE.COMBAT ||
+                         this.type === ROOM_TYPE.ELITE ||
+                         this.type === ROOM_TYPE.BOSS);
+
+    this.state = this.isCombatRoom ? 'fighting' : 'clear';
+    this.doorsOpen = !this.isCombatRoom;
     this.clearTime = 0;
-    this.doorsOpen = false;
     this.spawnFx = 0;
+    this.everCleared = false;
+    this._spawnCounter = 0;
 
     this._buildWalls();
     this._buildFloor();
     this._planWaves();
+    this._spawnProps();
     this._startWave();
   }
 
+  get meta() { return ROOM_META[this.type] || ROOM_META.combat; }
+
   /* ---------------------------------------------------------
-     墙体 / 门
+     墙体 / 门（只在有连接的方向开门洞）
      --------------------------------------------------------- */
   _buildWalls() {
     const W = VIEW_W, H = VIEW_H, T = WALL_T;
     const cx = W / 2, cy = H / 2, dw = DOOR_W / 2;
 
-    /* 门全部封闭时的四面墙 */
+    /* 全封闭四面墙：敌人与投射物永远用这一套 */
     this.wallsClosed = [
       { x: 0, y: 0, w: W, h: T, inner: 'bottom' },
       { x: 0, y: H - T, w: W, h: T, inner: 'top' },
@@ -1828,46 +3939,69 @@ class Room {
       { x: W - T, y: T, w: T, h: H - T * 2, inner: 'left' }
     ];
 
-    /* 门打开后：每面墙被门洞切成两段 */
+    /* 门打开后使用的墙体：有连接的方向留出门洞，其余保持实心 */
     const open = [];
-    open.push({ x: 0, y: 0, w: cx - dw, h: T, inner: 'bottom' });
-    open.push({ x: cx + dw, y: 0, w: W - (cx + dw), h: T, inner: 'bottom' });
-    open.push({ x: 0, y: H - T, w: cx - dw, h: T, inner: 'top' });
-    open.push({ x: cx + dw, y: H - T, w: W - (cx + dw), h: T, inner: 'top' });
-    open.push({ x: 0, y: T, w: T, h: cy - dw - T, inner: 'right' });
-    open.push({ x: 0, y: cy + dw, w: T, h: H - T - (cy + dw), inner: 'right' });
-    open.push({ x: W - T, y: T, w: T, h: cy - dw - T, inner: 'left' });
-    open.push({ x: W - T, y: cy + dw, w: T, h: H - T - (cy + dw), inner: 'left' });
+    const seg = (side) => {
+      if (side === 'top') {
+        if (this.connections.top) {
+          open.push({ x: 0, y: 0, w: cx - dw, h: T, inner: 'bottom' });
+          open.push({ x: cx + dw, y: 0, w: W - (cx + dw), h: T, inner: 'bottom' });
+        } else open.push({ x: 0, y: 0, w: W, h: T, inner: 'bottom' });
+      } else if (side === 'bottom') {
+        if (this.connections.bottom) {
+          open.push({ x: 0, y: H - T, w: cx - dw, h: T, inner: 'top' });
+          open.push({ x: cx + dw, y: H - T, w: W - (cx + dw), h: T, inner: 'top' });
+        } else open.push({ x: 0, y: H - T, w: W, h: T, inner: 'top' });
+      } else if (side === 'left') {
+        if (this.connections.left) {
+          open.push({ x: 0, y: T, w: T, h: cy - dw - T, inner: 'right' });
+          open.push({ x: 0, y: cy + dw, w: T, h: H - T - (cy + dw), inner: 'right' });
+        } else open.push({ x: 0, y: T, w: T, h: H - T * 2, inner: 'right' });
+      } else {
+        if (this.connections.right) {
+          open.push({ x: W - T, y: T, w: T, h: cy - dw - T, inner: 'left' });
+          open.push({ x: W - T, y: cy + dw, w: T, h: H - T - (cy + dw), inner: 'left' });
+        } else open.push({ x: W - T, y: T, w: T, h: H - T * 2, inner: 'left' });
+      }
+    };
+    seg('top'); seg('bottom'); seg('left'); seg('right');
     this.wallsOpen = open;
 
     /* 门：洞口矩形 + 触发区（略微向房间内延伸） */
     const trig = 8;
-    this.doors = [
-      {
+    this.doors = [];
+    if (this.connections.top) {
+      this.doors.push({
         side: 'top', dir: { x: 0, y: -1 },
         gap: { x: cx - dw, y: 0, w: dw * 2, h: T },
         trigger: { x: cx - dw + trig, y: 0, w: dw * 2 - trig * 2, h: T + trig }
-      },
-      {
+      });
+    }
+    if (this.connections.bottom) {
+      this.doors.push({
         side: 'bottom', dir: { x: 0, y: 1 },
         gap: { x: cx - dw, y: H - T, w: dw * 2, h: T },
         trigger: { x: cx - dw + trig, y: H - T - trig, w: dw * 2 - trig * 2, h: T + trig }
-      },
-      {
+      });
+    }
+    if (this.connections.left) {
+      this.doors.push({
         side: 'left', dir: { x: -1, y: 0 },
         gap: { x: 0, y: cy - dw, w: T, h: dw * 2 },
         trigger: { x: 0, y: cy - dw + trig, w: T + trig, h: dw * 2 - trig * 2 }
-      },
-      {
+      });
+    }
+    if (this.connections.right) {
+      this.doors.push({
         side: 'right', dir: { x: 1, y: 0 },
         gap: { x: W - T, y: cy - dw, w: T, h: dw * 2 },
         trigger: { x: W - T - trig, y: cy - dw + trig, w: T + trig, h: dw * 2 - trig * 2 }
-      }
-    ];
+      });
+    }
   }
 
   /* ---------------------------------------------------------
-     地板（一次性烘焙到离屏画布）
+     地板（一次性烘焙到离屏画布，按房间种子决定花纹）
      --------------------------------------------------------- */
   _buildFloor() {
     const c = document.createElement('canvas');
@@ -1875,22 +4009,19 @@ class Room {
     c.height = VIEW_H;
     const g = c.getContext('2d');
 
-    /* 房间外底色 */
     g.fillStyle = '#05070c';
     g.fillRect(0, 0, VIEW_W, VIEW_H);
-
-    /* 地板底 */
     g.fillStyle = '#0e151d';
     g.fillRect(ARENA.x, ARENA.y, ARENA.w, ARENA.h);
 
-    /* 地砖 */
     const ts = 64;
     g.save();
     g.beginPath();
     g.rect(ARENA.x, ARENA.y, ARENA.w, ARENA.h);
     g.clip();
 
-    const seedX = this.index * 37.7, seedY = this.index * 91.3;
+    const sd = hashSeed(this.roomSeed || (this.type + ':' + this.index));
+    const seedX = (sd % 97) * 0.37, seedY = (sd % 61) * 0.91;
     for (let ty = 0; ty * ts < ARENA.h + ts; ty++) {
       for (let tx = 0; tx * ts < ARENA.w + ts; tx++) {
         const n = hash2(tx + seedX, ty + seedY);
@@ -1899,8 +4030,6 @@ class Room {
         const shade = 14 + Math.floor(n * 12);
         g.fillStyle = `rgb(${shade}, ${shade + 6}, ${shade + 12})`;
         g.fillRect(x + 1, y + 1, ts - 2, ts - 2);
-
-        /* 少量刻纹 */
         if (n > 0.82) {
           g.strokeStyle = 'rgba(90,170,190,0.10)';
           g.lineWidth = 1.5;
@@ -1918,24 +4047,26 @@ class Room {
     }
     g.restore();
 
-    /* 中央符环 */
+    /* 房间类型决定中央符环颜色 */
+    const accent = this.meta.color;
     const cx = VIEW_W / 2, cy = VIEW_H / 2;
-    g.strokeStyle = 'rgba(255,170,80,0.055)';
+    g.strokeStyle = accent;
+    g.globalAlpha = 0.07;
     g.lineWidth = 3;
     g.beginPath(); g.arc(cx, cy, 168, 0, TAU); g.stroke();
     g.lineWidth = 1.5;
     g.beginPath(); g.arc(cx, cy, 148, 0, TAU); g.stroke();
-    g.strokeStyle = 'rgba(255,170,80,0.05)';
     g.lineWidth = 2;
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * TAU;
+    const spokes = this.type === ROOM_TYPE.BOSS ? 8 : 6;
+    for (let i = 0; i < spokes; i++) {
+      const a = (i / spokes) * TAU;
       g.beginPath();
       g.moveTo(cx + Math.cos(a) * 148, cy + Math.sin(a) * 148);
       g.lineTo(cx + Math.cos(a) * 168, cy + Math.sin(a) * 168);
       g.stroke();
     }
+    g.globalAlpha = 1;
 
-    /* 内边缘暗角 */
     const vg = g.createRadialGradient(cx, cy, ARENA.h * 0.35, cx, cy, ARENA.h * 0.85);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
     vg.addColorStop(1, 'rgba(0,0,0,0.45)');
@@ -1946,33 +4077,46 @@ class Room {
   }
 
   /* ---------------------------------------------------------
-     敌人波次规划
+     敌人波次（使用房间专属 Rng → 同种子可复现）
      --------------------------------------------------------- */
   _planWaves() {
-    const idx = this.index;
-    const total = Math.min(11, 3 + idx);
+    const rng = this.rng;
+    this.waves = [];
 
-    /* 可用类型随房间深度解锁 */
+    if (!this.isCombatRoom) return;
+
+    if (this.type === ROOM_TYPE.BOSS) {
+      this.waves = [['boss']];
+      return;
+    }
+
+    const depth = this.depth;
+    const elite = this.type === ROOM_TYPE.ELITE;
+    const total = elite
+      ? Math.min(7, 3 + Math.floor(depth * 0.9))
+      : Math.min(10, 3 + Math.floor(depth * 1.1));
+
     const pool = [['chaser', 5]];
-    if (idx >= 1) pool.push(['shooter', 3]);
-    if (idx >= 2) pool.push(['charger', idx >= 4 ? 3 : 2]);
+    pool.push(['shooter', depth >= 1 ? 3 : 2]);
+    pool.push(['charger', depth >= 2 ? 3 : 2]);
+    if (elite) pool.push(['charger', 3], ['shooter', 2]);
 
     const list = [];
     for (let i = 0; i < total; i++) {
       let sum = 0;
       for (const p of pool) sum += p[1];
-      let r = Math.random() * sum;
+      let r = rng.next() * sum;
+      let chosen = 'chaser';
       for (const p of pool) {
         r -= p[1];
-        if (r <= 0) { list.push(p[0]); break; }
+        if (r <= 0) { chosen = p[0]; break; }
       }
+      list.push(chosen);
     }
-    /* 保证至少一只追击者，避免开局全远程僵持 */
     if (!list.includes('chaser')) list[0] = 'chaser';
 
-    if (total <= 5) {
-      this.waves = [list];
-    } else {
+    if (total <= 5 || elite) this.waves = [list];
+    else {
       const cut = Math.ceil(total * 0.55);
       this.waves = [list.slice(0, cut), list.slice(cut)];
     }
@@ -1984,13 +4128,41 @@ class Room {
   }
 
   /* ---------------------------------------------------------
-     出生点：远离玩家、彼此不重叠
+     可交互物件（宝箱 / 祭坛 / 商栈）
+     --------------------------------------------------------- */
+  _spawnProps() {
+    const cx = VIEW_W / 2, cy = VIEW_H / 2;
+    const rng = this.rng;
+    switch (this.type) {
+      case ROOM_TYPE.TREASURE:
+        /* 主宝箱居中；第 2 层起两侧各多一口小箱 */
+        this.props.push(new Chest(this.game, cx, cy, rng.fork('chest'), false));
+        if (this.depth >= 1) {
+          this.props.push(new Chest(this.game, cx - 190, cy + 40, rng.fork('chestL'), true));
+          this.props.push(new Chest(this.game, cx + 190, cy + 40, rng.fork('chestR'), true));
+        }
+        break;
+      case ROOM_TYPE.EVENT:
+        this.props.push(new Shrine(this.game, cx, cy, rng.fork('shrine')));
+        break;
+      case ROOM_TYPE.SHOP:
+        this.props.push(new Pedestal(this.game, cx - 110, cy, rng.fork('shop0'), 10));
+        this.props.push(new Pedestal(this.game, cx + 110, cy, rng.fork('shop1'), 16));
+        break;
+      default:
+        break;
+    }
+  }
+
+  /* ---------------------------------------------------------
+     出生点：远离玩家、彼此不重叠（用房间 Rng）
      --------------------------------------------------------- */
   _spawnPoint(radius) {
     const p = this.game.player;
+    const rng = this.rng;
     for (let attempt = 0; attempt < 40; attempt++) {
-      const x = rand(ARENA.x + radius + 24, ARENA.x + ARENA.w - radius - 24);
-      const y = rand(ARENA.y + radius + 24, ARENA.y + ARENA.h - radius - 24);
+      const x = rng.range(ARENA.x + radius + 24, ARENA.x + ARENA.w - radius - 24);
+      const y = rng.range(ARENA.y + radius + 24, ARENA.y + ARENA.h - radius - 24);
       if (p && dist(x, y, p.x, p.y) < 210) continue;
       let ok = true;
       for (const e of this.enemies) {
@@ -1998,9 +4170,8 @@ class Room {
       }
       if (ok) return { x: x, y: y };
     }
-    /* 兜底：房间四角 */
     const cx = ARENA.x + ARENA.w / 2, cy = ARENA.y + ARENA.h / 2;
-    const sx = chance(0.5) ? -1 : 1, sy = chance(0.5) ? -1 : 1;
+    const sx = rng.chance(0.5) ? -1 : 1, sy = rng.chance(0.5) ? -1 : 1;
     return {
       x: clamp(cx + sx * ARENA.w * 0.36, ARENA.x + 50, ARENA.x + ARENA.w - 50),
       y: clamp(cy + sy * ARENA.h * 0.36, ARENA.y + 50, ARENA.y + ARENA.h - 50)
@@ -2008,12 +4179,16 @@ class Room {
   }
 
   _spawnEnemy(type) {
-    const r = type === 'charger' ? 19 : (type === 'shooter' ? 18 : 16);
-    const pt = this._spawnPoint(r);
-    const e = EnemyFactory.create(this.game, type, pt.x, pt.y, this.index);
+    const r = type === 'boss' ? 34 : (type === 'charger' ? 19 : (type === 'shooter' ? 18 : 16));
+    const pt = type === 'boss'
+      ? { x: ARENA.x + ARENA.w / 2, y: ARENA.y + 120 }
+      : this._spawnPoint(r);
+    /* 每只敌人派生独立 Rng → 敌人组成、出生点、行为都随种子复现 */
+    const e = EnemyFactory.create(this.game, type, pt.x, pt.y, this.tier,
+      this.rng.fork('enemy' + this._spawnCounter++));
     this.enemies.push(e);
     this.spawnFx = 0.3;
-    this.game.particles.ring(pt.x, pt.y, e.colors[1], 12, 150);
+    this.game.particles.ring(pt.x, pt.y, e.colors[1], type === 'boss' ? 26 : 12, type === 'boss' ? 260 : 150);
     return e;
   }
 
@@ -2038,7 +4213,7 @@ class Room {
     /* 敌人 */
     for (const e of this.enemies) e.update(dt);
 
-    /* 互相分离，避免叠在一起 */
+    /* 互相分离 */
     const n = this.enemies.length;
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
@@ -2047,10 +4222,12 @@ class Room {
     }
     for (const e of this.enemies) this.clampEntity(e, false);
 
-    /* 清理尸体 */
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       if (this.enemies[i].dead) this.enemies.splice(i, 1);
     }
+
+    /* 物件 */
+    for (const pr of this.props) pr.update(dt);
 
     /* 房间结算 */
     if (this.state === 'fighting') {
@@ -2061,7 +4238,7 @@ class Room {
             this.waveIndex++;
             this.waveTimer = 0.9;
             this._startWave();
-            this.game.ui.showBanner('残形涌现', '第二波', 1.1);
+            this.game.ui.showBanner('残形涌现', '下一波', 1.1);
           }
         } else {
           this.markCleared();
@@ -2072,12 +4249,33 @@ class Room {
     }
   }
 
+  /* ---------------------------------------------------------
+     重新进入（复用实例时调用）：只重置瞬时表现，绝不重建敌人 / 物件
+     --------------------------------------------------------- */
+  onReenter() {
+    this.spawnFx = 0;
+    if (this.state === 'fighting') {
+      /* 战斗未结束就返回（理论上门是关的）：重新锁门 */
+      this.doorsOpen = false;
+      this.clearTime = 0;
+    }
+  }
+
   markCleared() {
     if (this.state === 'clear') return;
     this.state = 'clear';
     this.doorsOpen = true;
     this.clearTime = 0;
-    this.game.onRoomCleared();
+    this.everCleared = true;
+
+    /* Boss 房通关 → 生成层间裂隙；精英房通关 → 掉落宝箱 */
+    if (this.type === ROOM_TYPE.BOSS) {
+      this.props.push(new Portal(this.game, ARENA.x + ARENA.w / 2, ARENA.y + ARENA.h / 2));
+    } else if (this.type === ROOM_TYPE.ELITE) {
+      this.props.push(new Chest(this.game, ARENA.x + ARENA.w / 2, ARENA.y + ARENA.h / 2,
+        this.rng.fork('eliteChest'), false));
+    }
+    this.game.onRoomCleared(this);
   }
 
   /* ---------------------------------------------------------
@@ -2088,10 +4286,28 @@ class Room {
     return Collision.resolveAll(e, walls);
   }
 
-  /* 投射物是否撞墙（门关闭与否都视为实心，子弹不会飞出房间） */
   hitsWall(x, y, r) {
     for (const w of this.wallsClosed) {
       if (Collision.circleRect(x, y, r, w)) return true;
+    }
+    return false;
+  }
+
+  /* 投射物撞墙反弹：就地修改 vx / vy 并推出墙体，返回是否发生反弹 */
+  bounceOffWalls(p) {
+    for (const w of this.wallsClosed) {
+      if (!Collision.circleRect(p.x, p.y, p.r, w)) continue;
+      const overLeft = (p.x + p.r) - w.x;
+      const overRight = (w.x + w.w) - (p.x - p.r);
+      const overTop = (p.y + p.r) - w.y;
+      const overBottom = (w.y + w.h) - (p.y - p.r);
+      const m = Math.min(overLeft, overRight, overTop, overBottom);
+      /* overLeft = 需要向左挪多少才能脱离左面，以此类推 */
+      if (m === overLeft) { p.vx = -Math.abs(p.vx); p.x -= overLeft; }
+      else if (m === overRight) { p.vx = Math.abs(p.vx); p.x += overRight; }
+      else if (m === overTop) { p.vy = -Math.abs(p.vy); p.y -= overTop; }
+      else { p.vy = Math.abs(p.vy); p.y += overBottom; }
+      return true;
     }
     return false;
   }
@@ -2102,7 +4318,6 @@ class Room {
     return c + this.pending.length;
   }
 
-  /* 玩家是否踩进了打开的门 */
   doorUnder(px, py) {
     if (!this.doorsOpen) return null;
     for (const d of this.doors) {
@@ -2111,13 +4326,16 @@ class Room {
     return null;
   }
 
+  doorBySide(side) {
+    for (const d of this.doors) if (d.side === side) return d;
+    return null;
+  }
+
   /* ---------------------------------------------------------
      绘制
      --------------------------------------------------------- */
   drawFloor(ctx) {
     ctx.drawImage(this.floorCanvas, 0, 0);
-
-    /* 清空后地板中心的暖色脉冲 */
     if (this.state === 'clear') {
       const t = this.clearTime;
       const a = 0.10 + 0.05 * Math.sin(t * 3);
@@ -2130,17 +4348,19 @@ class Room {
     }
   }
 
+  drawProps(ctx) {
+    for (const pr of this.props) pr.draw(ctx);
+  }
+
   drawWalls(ctx) {
     const walls = this.doorsOpen ? this.wallsOpen : this.wallsClosed;
 
-    /* 门洞（地板延伸 + 状态光） */
     for (const d of this.doors) {
       const g = d.gap;
       ctx.fillStyle = '#0b1119';
       ctx.fillRect(g.x, g.y, g.w, g.h);
 
       if (this.doorsOpen) {
-        /* 开启：青绿色通行光 */
         const pulse = 0.5 + 0.5 * Math.sin(this.clearTime * 3.4);
         const grad = ctx.createLinearGradient(g.x, g.y, g.x + (g.w > g.h ? 0 : g.w), g.y + (g.h > g.w ? g.h : 0));
         grad.addColorStop(0, 'rgba(90,255,190,0.05)');
@@ -2149,12 +4369,10 @@ class Room {
         ctx.fillStyle = grad;
         ctx.fillRect(g.x, g.y, g.w, g.h);
 
-        /* 门框 */
         ctx.strokeStyle = 'rgba(140,255,210,0.75)';
         ctx.lineWidth = 2.5;
         ctx.strokeRect(g.x + 1, g.y + 1, g.w - 2, g.h - 2);
       } else {
-        /* 封闭：赤色能量屏障 */
         ctx.fillStyle = 'rgba(255,70,60,0.13)';
         ctx.fillRect(g.x, g.y, g.w, g.h);
         ctx.save();
@@ -2165,7 +4383,8 @@ class Room {
         ctx.lineWidth = 3;
         const off = (this.game.time * 42) % 22;
         const horiz = g.w > g.h;
-        for (let i = -1; i < (horiz ? g.w : g.h) / 22 + 2; i++) {
+        const len = horiz ? g.w : g.h;
+        for (let i = -1; i < len / 22 + 2; i++) {
           ctx.beginPath();
           if (horiz) {
             const x = g.x + i * 22 + off;
@@ -2185,19 +4404,16 @@ class Room {
       }
     }
 
-    /* 墙体 */
     for (const w of walls) {
       ctx.fillStyle = '#171d29';
       ctx.fillRect(w.x, w.y, w.w, w.h);
 
-      /* 内侧面高光 */
       ctx.fillStyle = '#2b3547';
       if (w.inner === 'bottom') ctx.fillRect(w.x, w.y + w.h - 5, w.w, 5);
       else if (w.inner === 'top') ctx.fillRect(w.x, w.y, w.w, 5);
       else if (w.inner === 'right') ctx.fillRect(w.x + w.w - 5, w.y, 5, w.h);
       else ctx.fillRect(w.x, w.y, 5, w.h);
 
-      /* 砖缝 */
       ctx.strokeStyle = 'rgba(0,0,0,0.28)';
       ctx.lineWidth = 1;
       const horiz = w.w > w.h;
@@ -2214,7 +4430,6 @@ class Room {
       }
       ctx.stroke();
 
-      /* 外框 */
       ctx.strokeStyle = 'rgba(0,0,0,0.55)';
       ctx.lineWidth = 2;
       ctx.strokeRect(w.x + 0.5, w.y + 0.5, w.w - 1, w.h - 1);
@@ -2225,7 +4440,7 @@ class Room {
 </script>
 <script>
 /* ===========================================================
-   ui.js — HUD（Canvas 绘制）+ 遮罩面板（DOM）+ 横幅提示 + 准星
+   ui.js — HUD（Canvas）+ 遮罩面板（DOM）+ 小地图 + 横幅 + 准星
    =========================================================== */
 'use strict';
 
@@ -2236,7 +4451,6 @@ class UI {
     this.hintTimer = 9;
     this.hitVignette = 0;
 
-    /* DOM 元素 */
     this.overlay = document.getElementById('overlay');
     this.elKicker = document.getElementById('ov-kicker');
     this.elTitleCn = document.getElementById('ov-title-cn');
@@ -2244,12 +4458,26 @@ class UI {
     this.elText = document.getElementById('ov-text');
     this.elBtn = document.getElementById('ov-btn');
     this.elHint = document.getElementById('ov-hint');
+    this.elSeed = document.getElementById('seed-input');
 
     this.elBtn.addEventListener('click', () => {
       this.game.primaryAction();
     });
 
     this.setOverlay('title');
+  }
+
+  /* 玩家当前 Build 的一句话摘要（遮罩面板用） */
+  buildSummary(g) {
+    if (!g.player || !g.player.build) return '';
+    const slots = g.player.build.slots;
+    if (!slots.length) return '尚无道具';
+    const names = slots.slice(0, 8).map(s => {
+      const it = ITEM_BY_ID[s.id];
+      return (it ? it.name : s.id) + (s.n > 1 ? `×${s.n}` : '');
+    });
+    const more = slots.length > 8 ? ` 等 ${slots.length} 类` : '';
+    return names.join('、') + more;
   }
 
   /* ---------------------------------------------------------
@@ -2263,6 +4491,7 @@ class UI {
     }
     this.overlay.classList.remove('hidden');
 
+    const g = this.game;
     if (mode === 'title') {
       this.elKicker.textContent = 'ORIGINAL ROGUELIKE SHOOTER';
       this.elTitleCn.textContent = '残响回廊';
@@ -2270,51 +4499,62 @@ class UI {
       this.elText.innerHTML =
         '星脉崩解之后，回廊在裂隙中生长。<br>' +
         '徘徊其中的，是回声凝成的残形。<br><br>' +
-        '你是最后的拾火者，收集余烬，向更深处走。';
+        '你是最后的拾火者，收集余烬，走到守望者面前。';
       this.elBtn.textContent = '开始探索';
-      this.elHint.textContent = 'WASD 移动 · 鼠标瞄准 · 左键射击 · ESC 暂停 · F 全屏';
+      const kbHint = 'WASD 移动 · 鼠标瞄准 · 左键射击 · E 交互 · ESC 暂停 · F 全屏';
+      this.elHint.textContent = (this.game.touchMode && this.touchHint) ? this.touchHint : kbHint;
+      if (this.elSeed) this.elSeed.style.display = '';
     } else if (mode === 'pause') {
       this.elKicker.textContent = 'SYSTEM HALT';
       this.elTitleCn.textContent = '暂停';
       this.elTitleEn.textContent = 'PAUSED';
       this.elText.innerHTML =
-        'WASD　移动<br>鼠标　瞄准<br>左键　射击<br>ESC　继续 / 暂停<br>R　重新开始';
+        `SEED　<b>${g.seed}</b><br>` +
+        `层数　<b>第 ${g.floor} 层</b><br>` +
+        `余烬　<b>${g.embers}</b><br>` +
+        `已探索　<b>${Object.keys(g.map ? g.map.visited : {}).length} / ${g.map ? g.map.cells.length : 0}</b> 间<br>` +
+        `持有道具　<b>${g.player ? g.player.build.length : 0}</b> 件<br>` +
+        `<span style="color:#8fa3b5">${this.buildSummary(g)}</span>`;
       this.elBtn.textContent = '继续';
-      this.elHint.textContent = '回廊仍在等待';
+      this.elHint.textContent = 'R 重新开始 · ESC 继续';
+      if (this.elSeed) this.elSeed.style.display = 'none';
     } else if (mode === 'gameover') {
-      const g = this.game;
       this.elKicker.textContent = 'EMBER EXTINGUISHED';
       this.elTitleCn.textContent = '火种熄灭';
       this.elTitleEn.textContent = 'RUN OVER';
       this.elText.innerHTML =
-        `抵达房间　<b>${g.roomIndex + 1}</b><br>` +
-        `击碎残形　<b>${g.kills}</b><br>` +
-        `射出弹丸　<b>${g.player ? g.player.shotsFired : 0}</b>`;
+        `SEED　<b>${g.seed}</b><br>` +
+        `抵达　<b>第 ${g.floor} 层 · ${g.roomTypeName()}</b><br>` +
+        `击碎残形　<b>${g.kills}</b>　射出弹丸　<b>${g.player ? g.player.shotsFired : 0}</b><br>` +
+        `持有道具　<b>${g.player ? g.player.build.length : 0}</b> 件<br>` +
+        `<span style="color:#8fa3b5">${this.buildSummary(g)}</span>`;
       this.elBtn.textContent = '重新开始';
-      this.elHint.textContent = '按 R 也可以重来';
+      this.elHint.textContent = '按 R 也可以重来（可先改 Seed）';
+      if (this.elSeed) this.elSeed.style.display = '';
     }
+  }
+
+  /* 读取玩家输入的 Seed（空则随机） */
+  readSeedInput() {
+    if (!this.elSeed) return '';
+    return (this.elSeed.value || '').trim().toUpperCase();
   }
 
   /* ---------------------------------------------------------
      横幅
      --------------------------------------------------------- */
   showBanner(text, sub, duration) {
+    if (!text) return;
     this.banner = {
-      text: text,
-      sub: sub || '',
-      life: duration || 1.6,
-      maxLife: duration || 1.6,
+      text: text, sub: sub || '', life: duration || 1.6, maxLife: duration || 1.6,
       style: 'normal'
     };
   }
 
-  showClearBanner() {
+  showClearBanner(sub) {
     this.banner = {
-      text: 'ROOM CLEAR',
-      sub: '门已开启 · 走进门洞继续探索',
-      life: 2.4,
-      maxLife: 2.4,
-      style: 'clear'
+      text: 'ROOM CLEAR', sub: sub || '门已开启 · 走进门洞继续探索',
+      life: 2.4, maxLife: 2.4, style: 'clear'
     };
   }
 
@@ -2338,7 +4578,7 @@ class UI {
     /* ---- 左上：生命值 ---- */
     const bx = 26, by = 24, bw = 268, bh = 20;
     ctx.fillStyle = 'rgba(6,10,15,0.72)';
-    roundRectPath(ctx, bx - 8, by - 22, bw + 96, bh + 40, 8);
+    roundRectPath(ctx, bx - 8, by - 22, bw + 96, bh + 62, 8);
     ctx.fill();
     ctx.strokeStyle = 'rgba(120,190,220,0.18)';
     ctx.lineWidth = 1;
@@ -2350,7 +4590,6 @@ class UI {
     ctx.fillStyle = '#7fd7ea';
     ctx.fillText('拾火者 · EMBER', bx, by - 7);
 
-    /* 血条底 */
     ctx.fillStyle = '#2a1218';
     roundRectPath(ctx, bx, by, bw, bh, 5);
     ctx.fill();
@@ -2369,8 +4608,6 @@ class UI {
       roundRectPath(ctx, bx, by, bw * ratio, bh, 5);
       ctx.fill();
     }
-
-    /* 刻度 */
     ctx.strokeStyle = 'rgba(0,0,0,0.35)';
     ctx.lineWidth = 1;
     for (let i = 1; i < 5; i++) {
@@ -2388,42 +4625,64 @@ class UI {
     ctx.fillStyle = '#ffe9c0';
     ctx.textAlign = 'right';
     ctx.fillText(`${Math.ceil(p.hp)} / ${p.maxHp}`, bx + bw + 62, by + 15);
-    ctx.textAlign = 'left';
 
-    /* ---- 右上：房间信息 ---- */
-    const rx = VIEW_W - 26;
-    ctx.textAlign = 'right';
-    ctx.font = '800 22px "Segoe UI", system-ui, sans-serif';
-    ctx.fillStyle = '#e6eef7';
-    ctx.fillText(`房间 ${g.roomIndex + 1}`, rx, 44);
+    /* ---- 左上第二行：余烬 / 层数 / 房间 / Seed ---- */
+    ctx.textAlign = 'left';
+    ctx.font = '700 12px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = '#ffd35e';
+    ctx.fillText(`◈ ${g.embers} 余烬`, bx, by + 40);
 
     ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
+    const roomName = g.room ? g.room.meta.cn : '-';
     const alive = g.room ? g.room.aliveCount() : 0;
-    if (g.room && g.room.state === 'clear') {
-      ctx.fillStyle = '#7dffb0';
-      ctx.fillText('已肃清 · 门已开启', rx, 66);
-    } else {
-      ctx.fillStyle = alive > 0 ? '#ff9d6b' : '#8fa3b5';
-      ctx.fillText(`残形剩余 ${alive}`, rx, 66);
-    }
+    const statusTxt = (g.room && g.room.isCombatRoom)
+      ? (g.room.state === 'clear' ? '已肃清 · 门已开启' : `残形剩余 ${alive}`)
+      : '可自由通行';
+    ctx.fillStyle = (g.room && g.room.isCombatRoom && g.room.state !== 'clear') ? '#ff9d6b' : '#7dffb0';
+    ctx.fillText(`第 ${g.floor} 层 · ${roomName} · ${statusTxt}`, bx + 88, by + 40);
 
     ctx.fillStyle = '#5d6f7e';
-    ctx.fillText(`击碎 ${g.kills}`, rx, 84);
-    ctx.textAlign = 'left';
+    ctx.font = '600 11px "Segoe UI", system-ui, sans-serif';
+    ctx.fillText(`SEED ${g.seed}　击碎 ${g.kills}　${playerStatsText(p)}`, bx, by + 58);
+
+    /* ---- 右上：小地图 ---- */
+    this.drawMinimap(ctx);
+
+    /* ---- 左下：Build 面板（持有道具 + 组合） ---- */
+    this.drawBuildPanel(ctx);
+
+    /* ---- 交互提示 ---- */
+    if (g.nearProp && !g.nearProp.used) {
+      const txt = (g.touchMode ? '' : 'E · ') + g.nearProp.label;
+      ctx.textAlign = 'center';
+      ctx.font = '700 14px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      const w = ctx.measureText(txt).width + 26;
+      ctx.fillStyle = 'rgba(6,10,15,0.8)';
+      roundRectPath(ctx, VIEW_W / 2 - w / 2, VIEW_H - 74, w, 30, 8);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,200,110,0.5)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = '#ffd28a';
+      ctx.fillText(txt, VIEW_W / 2, VIEW_H - 55);
+      ctx.textAlign = 'left';
+    }
 
     /* ---- 底部操作提示（渐隐） ---- */
     if (this.hintTimer > 0) {
-      const a = clamp(this.hintTimer / 2.5, 0, 1);
-      ctx.globalAlpha = a;
+      ctx.globalAlpha = clamp(this.hintTimer / 2.5, 0, 1);
       ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
       ctx.fillStyle = '#6d8296';
       ctx.textAlign = 'center';
-      ctx.fillText('WASD 移动　·　鼠标瞄准　·　左键射击　·　ESC 暂停　·　F 全屏', VIEW_W / 2, VIEW_H - 22);
+      const hint = g.touchMode
+        ? '拖动屏幕两侧即可移动与射击'
+        : 'WASD 移动　·　鼠标瞄准　·　左键射击　·　E 交互　·　ESC 暂停　·　F 全屏';
+      ctx.fillText(hint, VIEW_W / 2, VIEW_H - 22);
       ctx.textAlign = 'left';
       ctx.globalAlpha = 1;
     }
 
-    /* ---- 受击暗角 ---- */
+    /* ---- 受击暗角 / 低血量 ---- */
     if (this.hitVignette > 0) {
       const a = this.hitVignette * 0.5;
       const vg = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.28, VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.78);
@@ -2432,8 +4691,6 @@ class UI {
       ctx.fillStyle = vg;
       ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     }
-
-    /* ---- 低血量心跳 ---- */
     if (p.hp > 0 && ratio < 0.3) {
       const pulse = 0.10 + 0.08 * Math.sin(g.time * 6);
       const vg = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.3, VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.8);
@@ -2442,6 +4699,276 @@ class UI {
       ctx.fillStyle = vg;
       ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     }
+
+    /* 悬停说明画在最上层 */
+    this.drawItemTooltip(ctx);
+  }
+
+  /* ---------------------------------------------------------
+     Build 面板：当前持有的道具（左下角）
+     鼠标悬停任意道具 → 显示完整说明
+     --------------------------------------------------------- */
+  drawBuildPanel(ctx) {
+    const g = this.game;
+    const p = g.player;
+    if (!p || !p.build) return;
+
+    const slots = p.build.slots;
+    const mx = g.mouseWorld.x, my = g.mouseWorld.y;
+    const rowH = 18;
+    const colW = 236;
+    const maxRows = 9;
+    const maxShow = maxRows * 2;
+    const shown = Math.min(slots.length, maxShow);
+    const cols = shown > maxRows ? 2 : 1;
+    const rowsUsed = Math.min(maxRows, shown);
+    const bottomY = VIEW_H - 28;
+    const panelH = 24 + rowsUsed * rowH;
+    const px = 26, py = bottomY - panelH;
+    const panelW = colW * cols;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(6,10,15,0.72)';
+    roundRectPath(ctx, px - 8, py - 8, panelW + 16, panelH + 12, 8);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(120,190,220,0.18)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    /* 标题 */
+    ctx.font = '700 11px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#7fd7ea';
+    ctx.fillText(`BUILD · ${p.build.length} 件道具`, px, py + 4);
+
+    /* 生效中的组合 */
+    this._hoverItem = null;
+    if (p.build.comboList.length) {
+      let cx2 = px + 118;
+      ctx.font = '700 10.5px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      ctx.fillStyle = '#c08bff';
+      const names = p.build.comboList.slice(0, 3).map(c => c.name).join(' · ');
+      const more = p.build.comboList.length > 3 ? ` +${p.build.comboList.length - 3}` : '';
+      ctx.fillText('组合 ' + names + more, cx2, py + 4);
+    }
+
+    /* 道具行（列优先排布） */
+    for (let i = 0; i < shown; i++) {
+      const it = ITEM_BY_ID[slots[i].id];
+      if (!it) continue;
+      const col = i >= maxRows ? 1 : 0;
+      const row = i % maxRows;
+      const x = px + col * colW;
+      const rowY = py + 22 + row * rowH;
+
+      /* 命中矩形（供悬停判定） */
+      const inRow = mx >= x - 4 && mx <= x + colW - 12 && my >= rowY - 11 && my <= rowY + 6;
+      if (inRow) this._hoverItem = { item: it, n: slots[i].n };
+
+      /* 分类色块 */
+      const cat = ITEM_CAT[it.cat] || ITEM_CAT.special;
+      ctx.fillStyle = it.color;
+      roundRectPath(ctx, x, rowY - 9, 11, 11, 3);
+      ctx.fill();
+
+      /* 名称 + 层数 */
+      ctx.font = '700 11px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      ctx.fillStyle = inRow ? '#ffffff' : '#d6e3ee';
+      const label = it.name + (slots[i].n > 1 ? ` ×${slots[i].n}` : '');
+      ctx.fillText(label, x + 16, rowY);
+
+      /* 分类标记 */
+      ctx.font = '600 9.5px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      ctx.fillStyle = cat.color;
+      const nameW = ctx.measureText(label).width;
+      ctx.fillText(cat.cn, x + 18 + nameW + 4, rowY);
+
+      if (inRow) {
+        ctx.strokeStyle = 'rgba(255,220,150,0.55)';
+        ctx.lineWidth = 1;
+        roundRectPath(ctx, x - 4, rowY - 11, colW - 12, 17, 4);
+        ctx.stroke();
+      }
+    }
+
+    if (slots.length > maxShow) {
+      ctx.font = '600 10px "Segoe UI", system-ui, sans-serif';
+      ctx.fillStyle = '#6d8296';
+      ctx.fillText(`+${slots.length - maxShow} 件未显示`, px + colW, py + 4);
+    }
+    ctx.restore();
+  }
+
+  /* 悬停说明浮层 */
+  drawItemTooltip(ctx) {
+    const h = this._hoverItem;
+    if (!h) return;
+    const it = h.item;
+    const cat = ITEM_CAT[it.cat] || ITEM_CAT.special;
+    const combos = this.game.player.build.combosOf(it.id);
+
+    const w = 306;
+    const lines = this._wrap(ctx, it.desc, w - 30, 12);
+    const boxH = 62 + lines.length * 16 + (combos.length ? 18 + combos.length * 14 : 0);
+    let x = this.game.mouseWorld.x + 18;
+    let y = this.game.mouseWorld.y - boxH - 12;
+    if (x + w > VIEW_W - 12) x = VIEW_W - 12 - w;
+    if (y < 12) y = Math.min(VIEW_H - boxH - 12, this.game.mouseWorld.y + 20);
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(6,10,15,0.94)';
+    roundRectPath(ctx, x, y, w, boxH, 8);
+    ctx.fill();
+    ctx.strokeStyle = it.color;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    let ty = y + 22;
+
+    ctx.font = '800 14px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+    ctx.fillStyle = it.color;
+    ctx.fillText(it.name, x + 15, ty);
+
+    ctx.font = '700 11px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+    ctx.fillStyle = cat.color;
+    const nw = ctx.measureText(it.name).width;
+    ctx.fillText(cat.cn + (h.n > 1 ? ` ×${h.n}` : '') + `　上限 ${it.max}`, x + 19 + nw, ty);
+
+    ty += 20;
+    ctx.font = '600 12px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+    ctx.fillStyle = '#c8d8e4';
+    for (const ln of lines) { ctx.fillText(ln, x + 15, ty); ty += 16; }
+
+    if (combos.length) {
+      ty += 4;
+      ctx.font = '700 10.5px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      ctx.fillStyle = '#c08bff';
+      ctx.fillText('可参与的组合', x + 15, ty);
+      ty += 14;
+      ctx.font = '600 10.5px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      for (const c of combos) {
+        const active = this.game.player.build.comboList.indexOf(c) >= 0;
+        ctx.fillStyle = active ? c.color : '#5d6f7e';
+        ctx.fillText((active ? '◆ ' : '◇ ') + c.name + '　' + (active ? '已激活' : '需要 ' +
+          Object.keys(c.need).map(k => MOD_CN[k] || k).join(' + ')), x + 15, ty);
+        ty += 14;
+      }
+    }
+    ctx.restore();
+  }
+
+  /* 简单折行（兼容中文：逐字测量） */
+  _wrap(ctx, text, maxW, fontPx) {
+    ctx.font = `600 ${fontPx}px "Segoe UI", "PingFang SC", system-ui, sans-serif`;
+    const out = [];
+    let line = '';
+    for (const ch of text) {
+      const t = line + ch;
+      if (ctx.measureText(t).width > maxW && line) { out.push(line); line = ch; }
+      else line = t;
+    }
+    if (line) out.push(line);
+    return out;
+  }
+
+  /* ---------------------------------------------------------
+     小地图（右上角）
+     当前房间 / 已访问 / 未访问 / Boss / 特殊房间
+     --------------------------------------------------------- */
+  drawMinimap(ctx) {
+    const g = this.game;
+    const map = g.map;
+    if (!map) return;
+
+    const cell = 24;
+    const pad = 10;
+    const w = map.cols * cell, h = map.rows * cell;
+    const ox = VIEW_W - 26 - w, oy = 20;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(6,10,15,0.72)';
+    roundRectPath(ctx, ox - pad, oy - pad, w + pad * 2, h + pad * 2 + 4, 8);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(120,190,220,0.18)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    const cxOf = (c) => ox + c * cell + cell / 2;
+    const cyOf = (r) => oy + r * cell + cell / 2;
+
+    /* 连接线 */
+    ctx.strokeStyle = 'rgba(140,180,200,0.35)';
+    ctx.lineWidth = 2;
+    for (const cd of map.cells) {
+      if (!map.isVisited(cd) && cd !== map.current) continue;
+      for (const d of DIRS) {
+        const n = cd.links[d.side];
+        if (!n) continue;
+        ctx.beginPath();
+        ctx.moveTo(cxOf(cd.c), cyOf(cd.r));
+        ctx.lineTo(lerp(cxOf(cd.c), cxOf(n.c), 0.5), lerp(cyOf(cd.r), cyOf(n.r), 0.5));
+        ctx.stroke();
+      }
+    }
+
+    /* 房间格 */
+    for (const cd of map.cells) {
+      const meta = ROOM_META[cd.type] || ROOM_META.combat;
+      const visited = map.isVisited(cd);
+      const isCurrent = (cd === map.current);
+      const x = ox + cd.c * cell, y = oy + cd.r * cell;
+      const s = cell - 7;
+
+      /* 未访问：暗淡轮廓 */
+      if (!visited && !isCurrent) {
+        ctx.fillStyle = 'rgba(90,110,130,0.12)';
+        roundRectPath(ctx, x + 3.5, y + 3.5, s, s, 3);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(120,150,175,0.28)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        continue;
+      }
+
+      ctx.globalAlpha = isCurrent ? 1 : (visited ? 0.72 : 0.4);
+      ctx.fillStyle = meta.color;
+      roundRectPath(ctx, x + 3.5, y + 3.5, s, s, 3);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      /* 特殊房间字形 */
+      if (cd.type !== ROOM_TYPE.COMBAT) {
+        ctx.font = '800 11px "Segoe UI", system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#0b1017';
+        ctx.fillText(meta.glyph, x + 3.5 + s / 2, y + 3.5 + s / 2 + 0.5);
+      }
+
+      /* 当前房间：脉冲高亮 + 中心点 */
+      if (isCurrent) {
+        const pulse = 0.6 + 0.4 * Math.sin(g.time * 5);
+        ctx.strokeStyle = `rgba(255,255,255,${pulse})`;
+        ctx.lineWidth = 2.5;
+        roundRectPath(ctx, x + 2, y + 2, s + 3, s + 3, 4);
+        ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(x + 3.5 + s / 2, y + 3.5 + s / 2, 2.4, 0, TAU);
+        ctx.fill();
+      }
+    }
+
+    ctx.font = '600 10px "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#6d8296';
+    ctx.fillText(`回廊地图　${Object.keys(map.visited).length}/${map.cells.length}`, ox + w / 2, oy + h + pad + 12);
+    ctx.textAlign = 'left';
+    ctx.restore();
   }
 
   /* ---- 横幅 ---- */
@@ -2449,7 +4976,6 @@ class UI {
     if (!this.banner) return;
     const b = this.banner;
     const t = b.life / b.maxLife;
-    /* 出现阶段放大，消失阶段淡出 */
     const inT = clamp((1 - t) * 5, 0, 1);
     const alpha = clamp(t * 2.2, 0, 1);
     const scale = 0.86 + easeOutCubic(inT) * 0.14;
@@ -2496,13 +5022,11 @@ class UI {
     const t = this.game.time;
     ctx.save();
     ctx.translate(m.x, m.y);
-
     ctx.strokeStyle = p && p.fireTimer > 0 ? 'rgba(255,220,150,0.95)' : 'rgba(150,240,255,0.85)';
     ctx.lineWidth = 1.8;
     ctx.beginPath();
     ctx.arc(0, 0, 9, 0, TAU);
     ctx.stroke();
-
     ctx.beginPath();
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * TAU + t * 0.6;
@@ -2510,19 +5034,54 @@ class UI {
       ctx.lineTo(Math.cos(a) * 17, Math.sin(a) * 17);
     }
     ctx.stroke();
-
     ctx.fillStyle = 'rgba(255,255,255,0.9)';
     ctx.beginPath();
     ctx.arc(0, 0, 1.8, 0, TAU);
     ctx.fill();
     ctx.restore();
   }
+
+  /* ---------------------------------------------------------
+     触屏层：虚拟摇杆 + 屏幕按钮
+     --------------------------------------------------------- */
+  drawTouchControls(ctx) {
+    const t = this.game.input && this.game.input.touch;
+    if (t) t.draw(ctx);
+
+    const btns = this.game.touchButtons ? this.game.touchButtons() : [];
+    for (let i = 0; i < btns.length; i++) {
+      const b = btns[i];
+      ctx.save();
+      ctx.fillStyle = 'rgba(8,14,20,0.62)';
+      roundRectPath(ctx, b.x, b.y, b.w, b.h, 10);
+      ctx.fill();
+      ctx.strokeStyle = (b.id === 'act') ? 'rgba(255,200,110,0.6)' : 'rgba(120,190,220,0.45)';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+
+      ctx.fillStyle = (b.id === 'act') ? '#ffd28a' : '#9fe4f5';
+      ctx.font = '700 16px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(b.label || '', b.x + b.w / 2, b.y + b.h / 2 + 1);
+      ctx.restore();
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  /* 切到触屏模式时替换操作提示文案 */
+  setTouchHint() {
+    this.touchHint = '左半屏拖动移动　·　右半屏拖动瞄准并射击　·　按钮交互 / 暂停';
+    if (this.elHint) this.elHint.textContent = this.touchHint;
+  }
 }
 
 </script>
 <script>
 /* ===========================================================
-   game.js — 主循环 / 状态机 / 房间推进 / 全局事件
+   game.js — 主循环 / 状态机 / 地图与房间推进 / 全局事件
+   扩展：程序生成的地图、Seed 系统、房间类型、摄像机滑动切换
    =========================================================== */
 'use strict';
 
@@ -2540,41 +5099,129 @@ class Game {
 
     this.state = 'title';        // title | playing | paused | gameover
     this.time = 0;
-    this.roomIndex = 0;
     this.kills = 0;
     this.shake = 0;
     this.transition = null;
     this.mouseWorld = { x: VIEW_W / 2, y: VIEW_H / 2 };
+    this.nearProp = null;
+    this.fx = [];                // 电弧等短时特效
+    this.zones = [];             // 泥沼等持续区域
+    this.touchMode = false;      // 触屏模式（首次触摸后自动开启）
+    this.rotateHintDismissed = false;
+    this.viewScale = 1;
+
+    /* 种子 / 层数 / 货币 / 已获得道具 */
+    this.seed = randomSeedString();
+    this.floor = 1;
+    this.embers = 0;
+    this.ownedItems = [];
 
     this.fps = 60;
     this._fpsAcc = 0;
     this._fpsFrames = 0;
 
+    /* 已实例化的房间缓存：key = floor#c,r
+       → 重新进入已探索的房间时复用同一实例，敌人 / 宝箱 / 状态都不会刷新 */
+    this.roomCache = {};
+
+    /* 首屏也要有一张地图和房间（标题界面背景） */
+    this.map = new GameMap(this.seed, this.floor);
     this.player = new Player(this, VIEW_W / 2, VIEW_H / 2 + 90);
-    this.room = new Room(this, 0);
+    this.room = this._roomFor(this.map.start);
+    this.map.current = this.map.start;
+    this.map.visit(this.map.start);
+
+    this._placePlayerAtEntry('bottom');
 
     this.input.onBlur = () => { if (this.state === 'playing') this.pause(); };
+
+    /* 触屏：按钮布局与回调接到 TouchControls 上 */
+    this.input.touch.buttonsFn = () => this.touchButtons();
+    this.input.touch.onButton = (id) => this.onTouchButton(id);
 
     this.resize();
     window.addEventListener('resize', () => this.resize());
     document.addEventListener('fullscreenchange', () => setTimeout(() => this.resize(), 60));
+    window.addEventListener('orientationchange', () => {
+      setTimeout(() => this.resize(), 80);
+      setTimeout(() => this.resize(), 400);
+    });
+    if (window.visualViewport && window.visualViewport.addEventListener) {
+      window.visualViewport.addEventListener('resize', () => this.resize());
+    }
   }
 
   /* ---------------------------------------------------------
-     尺寸
+     自适应尺寸：舞台用 transform 等比缩放，永远保持 16:9 不变形
      --------------------------------------------------------- */
   resize() {
     const stage = document.getElementById('stage');
-    const pad = 30;
-    const aw = Math.max(400, window.innerWidth - pad);
-    const ah = Math.max(240, window.innerHeight - pad);
-    const s = Math.min(aw / VIEW_W, ah / VIEW_H);
-    stage.style.width = Math.floor(VIEW_W * s) + 'px';
-    stage.style.height = Math.floor(VIEW_H * s) + 'px';
+    const vv = window.visualViewport;
+    const de = document.documentElement;
+    const aw = Math.max(320, Math.round(vv ? vv.width : (de.clientWidth || window.innerWidth)));
+    const ah = Math.max(240, Math.round(vv ? vv.height : (de.clientHeight || window.innerHeight)));
 
-    this.dpr = Math.min(2, window.devicePixelRatio || 1);
-    this.canvas.width = Math.round(VIEW_W * this.dpr);
-    this.canvas.height = Math.round(VIEW_H * this.dpr);
+    /* 等比 contain：手机上不留白边，桌面留 30px 呼吸 */
+    const pad = this.touchMode ? 0 : 30;
+    const s = Math.min((aw - pad) / VIEW_W, (ah - pad) / VIEW_H);
+    this.viewScale = s;
+    if (stage) stage.style.transform = 'scale(' + s + ')';
+
+    /* 渲染分辨率：按实际显示大小决定 → 手机上降采样保 60FPS，高分屏不糊 */
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const rs = clamp(s * dpr, 0.75, 1.5);
+    if (Math.abs(rs - this.dpr) > 0.01) {
+      this.dpr = rs;
+      this.canvas.width = Math.round(VIEW_W * rs);
+      this.canvas.height = Math.round(VIEW_H * rs);
+    }
+
+    this._updateRotateHint(aw, ah);
+  }
+
+  /* 竖屏提示（仅触屏设备，且未被玩家关掉） */
+  _updateRotateHint(w, h) {
+    const el = document.getElementById('rotate-hint');
+    if (!el || !el.classList) return;
+    const portrait = h > w * 1.08;
+    const show = portrait && this.touchMode && !this.rotateHintDismissed;
+    if (show) el.classList.remove('hidden');
+    else el.classList.add('hidden');
+  }
+
+  /* 首次真实触摸 → 切到触屏模式 */
+  _enableTouchMode() {
+    if (this.touchMode) return;
+    this.touchMode = true;
+    if (document.body && document.body.classList) document.body.classList.add('touch-mode');
+    if (this.ui && this.ui.setTouchHint) this.ui.setTouchHint();
+    this.resize();
+  }
+
+  /* 触屏屏幕按钮（逻辑坐标，随画布一起缩放） */
+  touchButtons() {
+    if (!this.touchMode) return [];
+    if (this.state !== 'playing' && this.state !== 'paused') return [];
+    const list = [{
+      id: 'pause', x: VIEW_W - 92, y: VIEW_H - 92, w: 72, h: 72,
+      label: this.state === 'paused' ? '继续' : '暂停'
+    }];
+    if (this.state === 'playing' && this.nearProp && !this.nearProp.used) {
+      list.push({
+        id: 'act', x: VIEW_W / 2 - 86, y: VIEW_H - 172, w: 172, h: 60,
+        label: this.nearProp.label
+      });
+    }
+    return list;
+  }
+
+  onTouchButton(id) {
+    if (id === 'pause') {
+      if (this.state === 'playing') this.pause();
+      else if (this.state === 'paused') this.resume();
+    } else if (id === 'act') {
+      if (this.nearProp && !this.nearProp.used) this.nearProp.use();
+    }
   }
 
   toggleFullscreen() {
@@ -2590,38 +5237,59 @@ class Game {
   /* ---------------------------------------------------------
      流程控制
      --------------------------------------------------------- */
-  startRun() {
-    this.roomIndex = 0;
+  startRun(seedStr) {
+    this.seed = (seedStr && String(seedStr).trim().length)
+      ? String(seedStr).trim().toUpperCase()
+      : randomSeedString();
+
+    this.floor = 1;
     this.kills = 0;
+    this.embers = 0;
+    this.ownedItems = [];
     this.projectiles.length = 0;
+    this.fx.length = 0;
+    this.zones.length = 0;
     this.particles.clear();
     this.damageNumbers.clear();
     this.transition = null;
     this.shake = 0;
+    this.nearProp = null;
+    this.roomCache = {};
 
     this.player = new Player(this, VIEW_W / 2, VIEW_H / 2 + 90);
-    this.room = new Room(this, 0);
+    this.map = new GameMap(this.seed, this.floor);
     this.state = 'playing';
     this.ui.setOverlay(null);
-    this.ui.showBanner('回廊 · 第 1 间', '击败所有残形，门才会开启', 2.0);
+
+    this.room = this._roomFor(this.map.start);
+    this.map.current = this.map.start;
+    this.map.visit(this.map.start);
+    this._placePlayerAtEntry('bottom');
+
+    this.ui.showBanner('第 1 层 · ' + this.map.cells.length + ' 间',
+      'SEED ' + this.seed + ' · 走到守望者面前', 2.4);
   }
 
   pause() {
     if (this.state !== 'playing') return;
     this.state = 'paused';
+    if (this.input && this.input.touch) this.input.touch.releaseAll();
     this.ui.setOverlay('pause');
   }
 
   resume() {
     if (this.state !== 'paused') return;
     this.state = 'playing';
+    if (this.input && this.input.touch) this.input.touch.releaseAll();
     this.ui.setOverlay(null);
   }
 
   primaryAction() {
-    if (this.state === 'title' || this.state === 'gameover') this.startRun();
+    if (this.state === 'title' || this.state === 'gameover') this.startRun(this.ui.readSeedInput());
     else if (this.state === 'paused') this.resume();
   }
+
+  roomTypeName() { return this.room ? this.room.meta.cn : '-'; }
 
   onPlayerDeath() {
     this.state = 'gameover';
@@ -2634,40 +5302,91 @@ class Game {
 
   onEnemyKilled(e) {
     this.kills++;
+    let drop = 2;
+    if (e.type === 'charger') drop = 3;
+    else if (e.type === 'shooter') drop = 2;
+    if (e.type === 'boss') drop = 40;
+    if (e.isBoss) drop = 40;
+    this.embers += drop;
+    this.damageNumbers.add(e.x, e.y - 14, '◈' + drop, { color: '#ffd35e', life: 0.9, vy: -46 });
+
+    /* 击杀类组合 */
+    const m = (this.player && this.player.mods) ? this.player.mods : {};
+    if (m.killBlast > 0) {
+      this._explode(e.x, e.y, 56 + 12 * m.killBlast, 12 * m.killBlast, { color: '#ffd35e' });
+    }
+    if (m.freezeExplode > 0 && e.freezeT > 0) {
+      this._explode(e.x, e.y, 82, 24, { color: '#8fd8ff', freeze: true });
+    }
   }
 
-  onRoomCleared() {
-    this.ui.showClearBanner();
-    this.addShake(2.5);
-    this.player.heal(12);
+  onRoomCleared(room) {
+    if (room.type === ROOM_TYPE.BOSS) {
+      this.ui.showClearBanner('守望者已陨落 · 触碰裂隙进入下一层');
+      this.player.heal(35);
+      this.addShake(10);
+    } else if (room.isCombatRoom) {
+      this.ui.showClearBanner();
+      this.player.heal(room.type === ROOM_TYPE.ELITE ? 18 : 10);
+    }
+  }
+
+  nextFloor() {
+    this.floor++;
+    this.transition = null;
+    this.projectiles.length = 0;
+    this.fx.length = 0;
+    this.zones.length = 0;
+    this.particles.clear();
+    this.damageNumbers.clear();
+    this.roomCache = {};
+    this.map = new GameMap(this.seed, this.floor);
+    this.room = this._roomFor(this.map.start);
+    this.map.current = this.map.start;
+    this.map.visit(this.map.start);
+    this._placePlayerAtEntry('bottom');
+    this.player.heal(20);
+    this.ui.showBanner('第 ' + this.floor + ' 层',
+      '回廊重新排列 · ' + this.map.cells.length + ' 间', 2.4);
   }
 
   /* ---------------------------------------------------------
-     房间推进
+     房间创建与进入
      --------------------------------------------------------- */
-  enterDoor(door) {
-    if (this.transition) return;
-    this.transition = { t: 0, dur: 0.6, side: door.side, switched: false };
+  _createRoom(cell) {
+    const seedKey = this.seed + '#' + this.floor + '#' + cell.c + ',' + cell.r;
+    const rng = new Rng(hashSeed(seedKey));
+    const tier = (this.floor - 1) * 2 +
+      (cell.type === ROOM_TYPE.ELITE ? 3 : 0) +
+      (cell.branch ? 1 : 0);
+    return new Room(this, {
+      def: cell,
+      index: cell.id,
+      depth: this.floor - 1,
+      tier: tier,
+      connections: this.map.connectionsOf(cell),
+      rng: rng,
+      roomSeed: seedKey
+    });
   }
 
-  _updateTransition(dt) {
-    const tr = this.transition;
-    tr.t += dt;
-    const half = tr.dur * 0.45;
-    if (!tr.switched && tr.t >= half) {
-      tr.switched = true;
-      this.roomIndex++;
-      this.room = new Room(this, this.roomIndex);
-      this.projectiles.length = 0;
-      this.particles.clear();
-      const pos = this._entryPosition(OPPOSITE_DOOR[tr.side]);
-      this.player.x = pos.x;
-      this.player.y = pos.y;
-      this.player.invuln = Math.max(this.player.invuln, 0.8);
-      this.room.clampEntity(this.player, false);
-      this.ui.showBanner(`回廊 · 第 ${this.roomIndex + 1} 间`, '击败所有残形，门才会开启', 1.8);
+  /* 取（或首次创建）房间实例：已存在则复用，保证房间状态持久化 */
+  _roomFor(cell) {
+    const key = this.floor + '#' + cell.c + ',' + cell.r;
+    let room = this.roomCache[key];
+    if (!room) {
+      room = this._createRoom(cell);
+      this.roomCache[key] = room;
     }
-    if (tr.t >= tr.dur) this.transition = null;
+    return room;
+  }
+
+  _placePlayerAtEntry(side) {
+    const pos = this._entryPosition(side);
+    this.player.x = pos.x;
+    this.player.y = pos.y;
+    this.player.invuln = Math.max(this.player.invuln, 0.8);
+    this.room.clampEntity(this.player, this.room.doorsOpen);
   }
 
   _entryPosition(side) {
@@ -2681,6 +5400,57 @@ class Game {
     }
   }
 
+  _enterCell(cell, fromSide) {
+    const alreadyVisited = this.map.isVisited(cell);
+    this.map.current = cell;
+    this.map.visit(cell);
+    this.projectiles.length = 0;
+    this.particles.clear();
+    this.damageNumbers.clear();
+
+    /* 复用已有房间实例：已清空的房间不会再刷敌人，已开过的宝箱不会重置 */
+    this.room = this._roomFor(cell);
+    this.room.onReenter();
+    this._placePlayerAtEntry(fromSide ? OPPOSITE_DOOR[fromSide] : 'bottom');
+
+    const meta = ROOM_META[cell.type];
+    let sub;
+    if (alreadyVisited) {
+      if (cell.type === ROOM_TYPE.BOSS && this.room.state === 'clear') {
+        sub = '守望者已陨落 · 触碰裂隙进入下一层';
+      } else if (this.room.isCombatRoom && this.room.state !== 'clear') {
+        sub = '返回之前的房间 · 战斗继续';
+      } else if (cell.type === ROOM_TYPE.TREASURE || cell.type === ROOM_TYPE.SHOP ||
+                 cell.type === ROOM_TYPE.EVENT) {
+        sub = '已探索 · 开启过的物件保持原样';
+      } else {
+        sub = '已探索 · 房间保持清空状态';
+      }
+    } else if (cell.type === ROOM_TYPE.BOSS) sub = '守望者就在前方';
+    else if (cell.type === ROOM_TYPE.TREASURE) sub = '按 E 开启宝箱';
+    else if (cell.type === ROOM_TYPE.SHOP) sub = '按 E 购买强化';
+    else if (cell.type === ROOM_TYPE.EVENT) sub = '按 E 触碰异象';
+    else if (cell.type === ROOM_TYPE.ELITE) sub = '强力残形盘踞';
+    else if (cell.type === ROOM_TYPE.START) sub = '走进门洞开始探索';
+    else sub = '击败所有残形，门才会开启';
+    this.ui.showBanner(meta.cn, sub, alreadyVisited ? 1.2 : 1.5);
+  }
+
+  /* 走进门洞 → 摄像机滑向相邻房间 */
+  enterDoor(door) {
+    if (this.transition) return;
+    const target = this.map.neighbor(this.map.current, door.side);
+    if (!target) return;
+    this.transition = { t: 0, dur: 0.62, dir: door.dir, prevRoom: this.room };
+    this._enterCell(target, door.side);
+  }
+
+  _updateTransition(dt) {
+    const tr = this.transition;
+    tr.t += dt;
+    if (tr.t >= tr.dur) this.transition = null;
+  }
+
   /* ---------------------------------------------------------
      投射物
      --------------------------------------------------------- */
@@ -2688,6 +5458,237 @@ class Game {
     const p = new Projectile(opt);
     this.projectiles.push(p);
     return p;
+  }
+
+  /* =========================================================
+     道具机制的战斗结算
+     ========================================================= */
+
+  /* 命中敌人：吸血 / 状态 / 击退 */
+  _onHit(p, e, dmg, crit) {
+    const player = this.player;
+    if (p.burn > 0) e.applyStatus('burn', p.burn);
+    if (p.poison > 0) e.applyStatus('poison', p.poison);
+    if (p.slow > 0) e.applyStatus('slow', p.slow);
+    if (p.freeze > 0 && chance(Math.min(0.75, 0.18 * p.freeze))) e.applyStatus('freeze', p.freeze);
+
+    if (p.knockback > 0) {
+      const ang = angleTo(p.x, p.y, e.x, e.y);
+      const boost = (p.slowKnock > 0 && e.slowT > 0) ? 2 : 1;
+      const force = 130 * p.knockback * boost;
+      e.kx += Math.cos(ang) * force;
+      e.ky += Math.sin(ang) * force;
+    }
+
+    if (p.lifesteal > 0 && !player.dead) {
+      const mul = (crit && p.critVamp > 0) ? 3 : 1;
+      player._lsAcc = (player._lsAcc || 0) + dmg * 0.08 * p.lifesteal * mul;
+      if (player._lsAcc >= 1) {
+        const g = Math.floor(player._lsAcc);
+        player._lsAcc -= g;
+        player.hp = Math.min(player.maxHp, player.hp + g);
+      }
+    }
+  }
+
+  /* 子弹结束使命（命中或寿命耗尽）时的一次性结算 */
+  _bulletImpact(p, x, y, dmg, hitEnemy) {
+    if (p.explode > 0) {
+      const radius = 48 + 14 * p.explode + (p.homingExplode > 0 ? 22 : 0);
+      this._explode(x, y, radius, dmg, {
+        color: p.color,
+        burn: p.burnExplode > 0 ? Math.max(1, p.burn) : 0,
+        slow: p.slowExplode > 0,
+        zone: p.slowExplode > 0
+      });
+    }
+    if (p.split > 0 && p.splitLeft > 0) {
+      this._spawnSplit(p, x, y, Math.atan2(p.vy, p.vx));
+    }
+    if (p.chain > 0) this._chain(p, x, y, dmg);
+  }
+
+  /* 范围爆炸 */
+  _explode(x, y, radius, dmg, opt) {
+    opt = opt || {};
+    const color = opt.color || '#ff8a5c';
+    this.particles.ring(x, y, color, Math.round(radius * 0.45), radius * 3.2);
+    this.particles.burst(x, y, 16, {
+      speed: 260, life: 0.55, size: 5, colors: [color, '#ffffff', '#ffd35e']
+    });
+    this.addShake(2.6);
+
+    const mul = opt.dmgMul === undefined ? 0.6 : opt.dmgMul;
+    const amount = Math.max(1, Math.round(dmg * mul));
+    const list = this.room ? this.room.enemies : [];
+    for (const e of list) {
+      if (e.dead) continue;
+      if (dist2(x, y, e.x, e.y) > radius * radius) continue;
+      e.takeDamage(amount, x, y);
+      this.damageNumbers.add(e.x, e.y - e.r - 6, amount, { color: color });
+      if (opt.freeze) e.applyStatus('freeze', 1);
+      if (opt.slow) e.applyStatus('slow', 1);
+      if (opt.burn) e.applyStatus('burn', opt.burn);
+    }
+    if (opt.zone) this.zones.push({ x: x, y: y, r: radius * 0.9, life: 2.5, t: 0 });
+  }
+
+  /* 分裂碎片 */
+  _spawnSplit(p, x, y, baseAngle) {
+    const n = Math.min(8, p.split);
+    const proto = defaultMods();
+    for (let i = 0; i < n; i++) {
+      const a = baseAngle + (i - (n - 1) / 2) * 0.44;
+      const opt = {
+        x: x, y: y, angle: a, speed: p.speed * 0.9,
+        damage: p.damage, r: Math.max(2.5, p.r * 0.76),
+        friendly: true, color: p.color, core: p.core,
+        life: 0.85, game: this, splitLeft: 0, isChild: true
+      };
+      for (const k in proto) opt[k] = 0;
+      opt.damageMul = (p.damageMul || 1) * 0.55;
+      /* 毒素完整继承（毒染裂片）或减半继承 */
+      opt.poison = p.poisonSplit > 0 ? p.poison : Math.ceil(p.poison / 2);
+      opt.burn = p.burn;
+      opt.slow = p.slow;
+      opt.freeze = p.freeze;
+      opt.knockback = p.knockback;
+      opt.lifesteal = p.lifesteal;
+      opt.homing = (p.splitHoming > 0 || p.homing > 0) ? Math.max(1, p.homing) : 0;
+      this.spawnProjectile(opt);
+    }
+    this.particles.burst(x, y, 6, { speed: 150, life: 0.3, size: 3, color: p.color });
+  }
+
+  /* 链式电弧 */
+  _chain(p, x, y, dmg) {
+    const jumps = Math.min(4, p.chain);
+    const color = p.chainBurn > 0 ? '#ff9d3c' : (p.chainPoison > 0 ? '#9ad14f' : '#7fe4ff');
+    const used = [];
+    let cx = x, cy = y;
+    const list = this.room ? this.room.enemies : [];
+    for (let j = 0; j < jumps; j++) {
+      let best = null, bestD = 260 * 260;
+      for (const e of list) {
+        if (e.dead || used.indexOf(e) >= 0) continue;
+        const d = dist2(cx, cy, e.x, e.y);
+        if (d < bestD) { bestD = d; best = e; }
+      }
+      if (!best) break;
+      this._zap(cx, cy, best.x, best.y, color);
+      const amount = Math.max(1, Math.round(dmg * 0.55));
+      best.takeDamage(amount, cx, cy);
+      this.damageNumbers.add(best.x, best.y - best.r - 6, amount, { color: color });
+      if (p.chainPoison > 0) best.applyStatus('poison', Math.max(1, Math.ceil(p.poison / 2)));
+      if (p.chainBurn > 0) best.applyStatus('burn', Math.max(1, Math.ceil(p.burn / 2)));
+      if (p.chainExplode > 0 && p.explode > 0) {
+        this._explode(best.x, best.y, 40 + 14 * p.explode, amount, { color: color });
+      }
+      used.push(best);
+      cx = best.x; cy = best.y;
+    }
+  }
+
+  _zap(x1, y1, x2, y2, color) {
+    this.fx.push({ type: 'zap', x1: x1, y1: y1, x2: x2, y2: y2, life: 0.18, max: 0.18, color: color || '#7fe4ff' });
+  }
+
+  /* 烬迹：身周灼烧 */
+  burnAround(x, y, radius, dmg) {
+    const list = this.room ? this.room.enemies : [];
+    for (const e of list) {
+      if (e.dead) continue;
+      if (dist2(x, y, e.x, e.y) > radius * radius) continue;
+      e.applyStatus('burn', 1);
+      e.takeDot(Math.max(1, Math.round(dmg)), this.player);
+    }
+    if (Math.random() < 0.6) {
+      this.particles.spawn(x + rand(-14, 14), y + rand(-8, 14), rand(-16, 16), rand(-60, -24),
+        rand(0.25, 0.5), rand(2, 4), '#ff9d3c', { drag: 2.4 });
+    }
+  }
+
+  _updateFx(dt) {
+    for (let i = this.fx.length - 1; i >= 0; i--) {
+      this.fx[i].life -= dt;
+      if (this.fx[i].life <= 0) this.fx.splice(i, 1);
+    }
+    for (let i = this.zones.length - 1; i >= 0; i--) {
+      const z = this.zones[i];
+      z.life -= dt;
+      z.t += dt;
+      if (z.life <= 0) { this.zones.splice(i, 1); continue; }
+      const list = this.room ? this.room.enemies : [];
+      for (const e of list) {
+        if (e.dead) continue;
+        if (dist2(z.x, z.y, e.x, e.y) > z.r * z.r) continue;
+        e.applyStatus('slow', 1);
+        e.takeDot(6 * dt, this.player);
+      }
+    }
+  }
+
+  _drawZones(ctx) {
+    for (const z of this.zones) {
+      const a = 0.10 + 0.05 * Math.sin(z.t * 4);
+      const g = ctx.createRadialGradient(z.x, z.y, 4, z.x, z.y, z.r);
+      g.addColorStop(0, `rgba(90,169,255,${a + 0.10})`);
+      g.addColorStop(1, 'rgba(90,169,255,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(z.x, z.y, z.r, 0, TAU);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(140,210,255,0.35)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }
+
+  _drawFx(ctx) {
+    for (const f of this.fx) {
+      const a = clamp(f.life / f.max, 0, 1);
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.strokeStyle = f.color;
+      ctx.lineWidth = 3.5;
+      ctx.shadowColor = f.color;
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      /* 折线电弧 */
+      const seg = 5;
+      ctx.moveTo(f.x1, f.y1);
+      for (let i = 1; i < seg; i++) {
+        const t = i / seg;
+        const nx = lerp(f.x1, f.x2, t) + rand(-7, 7);
+        const ny = lerp(f.y1, f.y2, t) + rand(-7, 7);
+        ctx.lineTo(nx, ny);
+      }
+      ctx.lineTo(f.x2, f.y2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  _drawStatusRing(ctx, e) {
+    let color = null;
+    if (e.freezeT > 0) color = '#8fd8ff';
+    else if (e.burnT > 0 && e.burnStack >= e.poisonStack) color = '#ff9d3c';
+    else if (e.poisonT > 0) color = '#9ad14f';
+    else if (e.slowT > 0) color = '#5aa9ff';
+    if (!color) return;
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.r + 5, 0, TAU);
+    ctx.stroke();
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.r + 3, 0, TAU);
+    ctx.fill();
+    ctx.restore();
   }
 
   _updateProjectiles(dt) {
@@ -2698,10 +5699,31 @@ class Game {
       const p = this.projectiles[i];
       p.update(dt);
 
-      if (p.dead) { this.projectiles.splice(i, 1); continue; }
+      if (p.dead) {
+        if (p.friendly && p.explode > 0) {
+          const dmg = p.damage * (p.damageMul || 1);
+          this._explode(p.x, p.y, 48 + 14 * p.explode, dmg, { color: p.color });
+        }
+        this.projectiles.splice(i, 1);
+        continue;
+      }
 
-      /* 撞墙 */
+      /* 撞墙：反弹或消散 */
       if (room.hitsWall(p.x, p.y, p.r)) {
+        const boomerang = p.orbit > 0;      // 回旋弹永远不会被墙吃掉
+        if (p.bounce > 0 || boomerang) {
+          room.bounceOffWalls(p);
+          if (p.bounce > 0) p.bounce--;
+          this.particles.burst(p.x, p.y, 4, {
+            speed: 140, life: 0.24, size: 3, color: p.color, drag: 6
+          });
+          if (p.bounceHoming > 0) { p.homing = Math.max(1, p.homing); p.hitIds.length = 0; }
+          if (p.endlessRefract > 0) p.pierce = Math.max(1, p.pierce);
+          if (p.bounceExplode > 0 && p.explode > 0) {
+            this._explode(p.x, p.y, 42 + 14 * p.explode, p.damage * (p.damageMul || 1), { color: p.color });
+          }
+          continue;
+        }
         this.particles.burst(p.x, p.y, 5, {
           speed: 130, life: 0.26, size: 3, color: p.color, drag: 6
         });
@@ -2713,13 +5735,18 @@ class Game {
         let hit = null;
         for (const e of room.enemies) {
           if (e.dead) continue;
+          if (p.hitIds.indexOf(e) >= 0) continue;
           if (Collision.circleCircle(p.x, p.y, p.r, e.x, e.y, e.r)) { hit = e; break; }
         }
         if (hit) {
-          let dmg = p.damage;
           const crit = chance(player.critChance);
-          if (crit) dmg = Math.round(dmg * 2);
+          let dmg = p.damage * (p.damageMul || 1);
+          if (crit) dmg *= player.critDamage;
+          dmg = Math.max(1, Math.round(dmg));
+
           hit.takeDamage(dmg, p.x, p.y);
+          this._onHit(p, hit, dmg, crit);
+
           this.damageNumbers.add(hit.x, hit.y - hit.r - 6, dmg, { crit: crit });
           this.particles.burst(p.x, p.y, crit ? 9 : 4, {
             speed: 180, life: 0.3, size: 3.2,
@@ -2727,12 +5754,28 @@ class Game {
             dir: Math.atan2(p.vy, p.vx) + Math.PI, spread: 1.7
           });
           if (crit) this.addShake(2.4);
+
+          /* 穿透 / 回旋：继续飞行 */
+          if (p.pierce > 0 || p.orbit > 0) {
+            p.hitIds.push(hit);
+            if (p.pierce > 0 && !(p.orbitPierce > 0)) p.pierce--;
+            if (p.burnPierce > 0) hit.applyStatus('burn', 1);
+            if (p.freezePierce > 0) hit.applyStatus('freeze', Math.max(1, p.freeze));
+            if (p.pierceSplit > 0 && p.splitLeft > 0) {
+              this._spawnSplit(p, hit.x, hit.y, Math.atan2(p.vy, p.vx));
+              p.splitLeft--;
+            }
+            continue;
+          }
+
+          this._bulletImpact(p, hit.x, hit.y, dmg, hit);
           this.projectiles.splice(i, 1);
           continue;
         }
       } else {
         if (!player.dead && Collision.circleCircle(p.x, p.y, p.r, player.x, player.y, player.r)) {
           player.takeDamage(p.damage, p.x, p.y);
+          this.ui.hitVignette = 1;
           this.particles.burst(p.x, p.y, 6, {
             speed: 150, life: 0.3, size: 3.4, color: '#7fe4ff', drag: 5
           });
@@ -2755,18 +5798,32 @@ class Game {
     this.ui.update(dt);
     this.mouseWorld = this.input.toWorld();
 
+    /* 触屏：首次触摸自动切换模式；瞄准摇杆直接改写成世界瞄准点 */
+    if (this.input.touch.active && !this.touchMode) this._enableTouchMode();
+    if (this.touchMode) {
+      const ad = this.input.aimDir();
+      if (ad && this.player) {
+        this.mouseWorld = {
+          x: this.player.x + ad.x * 300,
+          y: this.player.y + ad.y * 300
+        };
+      }
+    }
+
     if (this.input.wasPressed('KeyF')) this.toggleFullscreen();
 
-    /* --- 标题 --- */
     if (this.state === 'title') {
-      if (this.input.wasPressed('Enter') || this.input.wasPressed('Space')) this.startRun();
+      if (this.input.wasPressed('Enter') || this.input.wasPressed('Space')) {
+        this.startRun(this.ui.readSeedInput());
+      }
       this.input.endFrame();
       return;
     }
 
-    /* --- 结束 --- */
     if (this.state === 'gameover') {
-      if (this.input.wasPressed('KeyR') || this.input.wasPressed('Enter')) this.startRun();
+      if (this.input.wasPressed('KeyR') || this.input.wasPressed('Enter')) {
+        this.startRun(this.ui.readSeedInput());
+      }
       this.particles.update(dt);
       this.damageNumbers.update(dt);
       this.shake = Math.max(0, this.shake - dt * 45);
@@ -2774,42 +5831,40 @@ class Game {
       return;
     }
 
-    /* --- 暂停 --- */
     if (this.state === 'paused') {
       if (this.input.wasPressed('Escape') || this.input.wasPressed('Enter')) this.resume();
-      if (this.input.wasPressed('KeyR')) this.startRun();
+      if (this.input.wasPressed('KeyR')) this.startRun(this.ui.readSeedInput());
       this.input.endFrame();
       return;
     }
 
     /* --- 游戏中 --- */
-    if (this.input.wasPressed('Escape')) {
-      this.pause();
-      this.input.endFrame();
-      return;
-    }
-    if (this.input.wasPressed('KeyR')) {
-      this.startRun();
-      this.input.endFrame();
-      return;
-    }
+    if (this.input.wasPressed('Escape')) { this.pause(); this.input.endFrame(); return; }
+    if (this.input.wasPressed('KeyR')) { this.startRun(this.ui.readSeedInput()); this.input.endFrame(); return; }
 
-    if (this.transition) {
-      this._updateTransition(dt);
-      this.input.endFrame();
-      return;
-    }
+    /* 摄像机滑动期间：世界照常运转，只是不再触发新的门 */
+    if (this.transition) this._updateTransition(dt);
 
     this.player.update(dt, this.input);
     this.room.update(dt);
     this._updateProjectiles(dt);
+    this._updateFx(dt);
     this.particles.update(dt);
     this.damageNumbers.update(dt);
     this.shake = Math.max(0, this.shake - dt * 45);
 
+    /* 交互物件 */
+    this.nearProp = null;
+    for (const pr of this.room.props) {
+      if (!pr.used && pr.inRange(this.player)) { this.nearProp = pr; break; }
+    }
+    if (this.nearProp && this.input.wasPressed('KeyE')) this.nearProp.use();
+
     /* 走进门洞 → 下一间 */
-    const door = this.room.doorUnder(this.player.x, this.player.y);
-    if (door) this.enterDoor(door);
+    if (!this.transition) {
+      const door = this.room.doorUnder(this.player.x, this.player.y);
+      if (door) this.enterDoor(door);
+    }
 
     this.input.endFrame();
   }
@@ -2817,6 +5872,23 @@ class Game {
   /* ---------------------------------------------------------
      绘制
      --------------------------------------------------------- */
+  _drawRoomScene(room, withPlayer) {
+    const ctx = this.ctx;
+    room.drawFloor(ctx);
+    this._drawZones(ctx);
+    room.drawProps(ctx);
+    for (const e of room.enemies) e.draw(ctx);
+    for (const e of room.enemies) if (e.hasStatus()) this._drawStatusRing(ctx, e);
+    if (withPlayer) {
+      this.player.draw(ctx);
+      for (const p of this.projectiles) p.draw(ctx);
+      this._drawFx(ctx);
+      this.particles.draw(ctx);
+      this.damageNumbers.draw(ctx);
+    }
+    room.drawWalls(ctx);
+  }
+
   draw() {
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -2827,33 +5899,31 @@ class Game {
     ctx.save();
     if (sh > 0.05) ctx.translate(rand(-sh, sh), rand(-sh, sh));
 
-    if (this.room) this.room.drawFloor(ctx);
+    if (this.transition) {
+      /* 摄像机沿行进方向滑动：旧房间滑出，新房间滑入 */
+      const tr = this.transition;
+      const t = easeInOutCubic(clamp(tr.t / tr.dur, 0, 1));
+      const O = { x: tr.dir.x * VIEW_W, y: tr.dir.y * VIEW_H };
 
-    if (this.room) {
-      for (const e of this.room.enemies) e.draw(ctx);
+      ctx.save();
+      ctx.translate(-O.x * t, -O.y * t);
+      this._drawRoomScene(tr.prevRoom, false);
+      ctx.restore();
+
+      ctx.save();
+      ctx.translate(O.x * (1 - t), O.y * (1 - t));
+      this._drawRoomScene(this.room, true);
+      ctx.restore();
+    } else {
+      this._drawRoomScene(this.room, true);
     }
-    if (this.player) this.player.draw(ctx);
-    for (const p of this.projectiles) p.draw(ctx);
-    this.particles.draw(ctx);
-    this.damageNumbers.draw(ctx);
-    if (this.room) this.room.drawWalls(ctx);
 
     ctx.restore();
-
-    /* 房间切换黑场 */
-    if (this.transition) {
-      const tr = this.transition;
-      const half = tr.dur * 0.45;
-      let a;
-      if (tr.t < half) a = tr.t / half;
-      else a = 1 - (tr.t - half) / (tr.dur - half);
-      ctx.fillStyle = `rgba(0,0,0,${clamp(a, 0, 1)})`;
-      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-    }
 
     this.ui.drawBanner(ctx);
     if (this.state !== 'title') this.ui.drawHUD(ctx);
     if (this.state === 'playing' && !this.transition) this.ui.drawCrosshair(ctx);
+    if (this.touchMode) this.ui.drawTouchControls(ctx);
   }
 
   /* ---------------------------------------------------------
@@ -2864,10 +5934,9 @@ class Game {
     if (this._last === undefined) this._last = now;
     let dt = now - this._last;
     this._last = now;
-    if (dt > 0.05) dt = 0.05;     // 掉帧保护
+    if (dt > 0.05) dt = 0.05;
     if (dt < 0) dt = 0;
 
-    /* FPS 统计 */
     this._fpsAcc += dt;
     this._fpsFrames++;
     if (this._fpsAcc >= 0.5) {
@@ -2879,7 +5948,6 @@ class Game {
     this.update(dt);
     this.draw();
 
-    /* FPS（右下角小字） */
     const ctx = this.ctx;
     ctx.font = '600 11px "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'right';
@@ -2927,6 +5995,31 @@ const OPPOSITE_DOOR = {
         fsBtn.blur();
       });
     }
+
+    /* 竖屏提示：可以关掉，关掉后不再弹出 */
+    const rhBtn = document.getElementById('rh-btn');
+    if (rhBtn) {
+      rhBtn.addEventListener('click', () => {
+        game.rotateHintDismissed = true;
+        const el = document.getElementById('rotate-hint');
+        if (el) el.classList.add('hidden');
+        rhBtn.blur();
+      });
+    }
+
+    /* 任意位置的首次触摸都立刻切到触屏模式（包括标题面板上的点击） */
+    const onFirstTouch = (e) => {
+      if (e.pointerType && e.pointerType !== 'touch') return;
+      game._enableTouchMode();
+      window.removeEventListener('pointerdown', onFirstTouch, true);
+    };
+    window.addEventListener('pointerdown', onFirstTouch, true);
+
+    /* 双击页面也可进入/继续（手机上手势兜底） */
+    document.addEventListener('dblclick', (e) => {
+      if (e.target && e.target.tagName === 'BUTTON') return;
+      game.primaryAction();
+    });
 
     game.start();
   }

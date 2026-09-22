@@ -25,6 +25,9 @@ class Game {
     this.nearProp = null;
     this.fx = [];                // 电弧等短时特效
     this.zones = [];             // 泥沼等持续区域
+    this.touchMode = false;      // 触屏模式（首次触摸后自动开启）
+    this.rotateHintDismissed = false;
+    this.viewScale = 1;
 
     /* 种子 / 层数 / 货币 / 已获得道具 */
     this.seed = randomSeedString();
@@ -51,26 +54,93 @@ class Game {
 
     this.input.onBlur = () => { if (this.state === 'playing') this.pause(); };
 
+    /* 触屏：按钮布局与回调接到 TouchControls 上 */
+    this.input.touch.buttonsFn = () => this.touchButtons();
+    this.input.touch.onButton = (id) => this.onTouchButton(id);
+
     this.resize();
     window.addEventListener('resize', () => this.resize());
     document.addEventListener('fullscreenchange', () => setTimeout(() => this.resize(), 60));
+    window.addEventListener('orientationchange', () => {
+      setTimeout(() => this.resize(), 80);
+      setTimeout(() => this.resize(), 400);
+    });
+    if (window.visualViewport && window.visualViewport.addEventListener) {
+      window.visualViewport.addEventListener('resize', () => this.resize());
+    }
   }
 
   /* ---------------------------------------------------------
-     尺寸 / 全屏
+     自适应尺寸：舞台用 transform 等比缩放，永远保持 16:9 不变形
      --------------------------------------------------------- */
   resize() {
     const stage = document.getElementById('stage');
-    const pad = 30;
-    const aw = Math.max(400, window.innerWidth - pad);
-    const ah = Math.max(240, window.innerHeight - pad);
-    const s = Math.min(aw / VIEW_W, ah / VIEW_H);
-    stage.style.width = Math.floor(VIEW_W * s) + 'px';
-    stage.style.height = Math.floor(VIEW_H * s) + 'px';
+    const vv = window.visualViewport;
+    const de = document.documentElement;
+    const aw = Math.max(320, Math.round(vv ? vv.width : (de.clientWidth || window.innerWidth)));
+    const ah = Math.max(240, Math.round(vv ? vv.height : (de.clientHeight || window.innerHeight)));
 
-    this.dpr = Math.min(2, window.devicePixelRatio || 1);
-    this.canvas.width = Math.round(VIEW_W * this.dpr);
-    this.canvas.height = Math.round(VIEW_H * this.dpr);
+    /* 等比 contain：手机上不留白边，桌面留 30px 呼吸 */
+    const pad = this.touchMode ? 0 : 30;
+    const s = Math.min((aw - pad) / VIEW_W, (ah - pad) / VIEW_H);
+    this.viewScale = s;
+    if (stage) stage.style.transform = 'scale(' + s + ')';
+
+    /* 渲染分辨率：按实际显示大小决定 → 手机上降采样保 60FPS，高分屏不糊 */
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const rs = clamp(s * dpr, 0.75, 1.5);
+    if (Math.abs(rs - this.dpr) > 0.01) {
+      this.dpr = rs;
+      this.canvas.width = Math.round(VIEW_W * rs);
+      this.canvas.height = Math.round(VIEW_H * rs);
+    }
+
+    this._updateRotateHint(aw, ah);
+  }
+
+  /* 竖屏提示（仅触屏设备，且未被玩家关掉） */
+  _updateRotateHint(w, h) {
+    const el = document.getElementById('rotate-hint');
+    if (!el || !el.classList) return;
+    const portrait = h > w * 1.08;
+    const show = portrait && this.touchMode && !this.rotateHintDismissed;
+    if (show) el.classList.remove('hidden');
+    else el.classList.add('hidden');
+  }
+
+  /* 首次真实触摸 → 切到触屏模式 */
+  _enableTouchMode() {
+    if (this.touchMode) return;
+    this.touchMode = true;
+    if (document.body && document.body.classList) document.body.classList.add('touch-mode');
+    if (this.ui && this.ui.setTouchHint) this.ui.setTouchHint();
+    this.resize();
+  }
+
+  /* 触屏屏幕按钮（逻辑坐标，随画布一起缩放） */
+  touchButtons() {
+    if (!this.touchMode) return [];
+    if (this.state !== 'playing' && this.state !== 'paused') return [];
+    const list = [{
+      id: 'pause', x: VIEW_W - 92, y: VIEW_H - 92, w: 72, h: 72,
+      label: this.state === 'paused' ? '继续' : '暂停'
+    }];
+    if (this.state === 'playing' && this.nearProp && !this.nearProp.used) {
+      list.push({
+        id: 'act', x: VIEW_W / 2 - 86, y: VIEW_H - 172, w: 172, h: 60,
+        label: this.nearProp.label
+      });
+    }
+    return list;
+  }
+
+  onTouchButton(id) {
+    if (id === 'pause') {
+      if (this.state === 'playing') this.pause();
+      else if (this.state === 'paused') this.resume();
+    } else if (id === 'act') {
+      if (this.nearProp && !this.nearProp.used) this.nearProp.use();
+    }
   }
 
   toggleFullscreen() {
@@ -122,12 +192,14 @@ class Game {
   pause() {
     if (this.state !== 'playing') return;
     this.state = 'paused';
+    if (this.input && this.input.touch) this.input.touch.releaseAll();
     this.ui.setOverlay('pause');
   }
 
   resume() {
     if (this.state !== 'paused') return;
     this.state = 'playing';
+    if (this.input && this.input.touch) this.input.touch.releaseAll();
     this.ui.setOverlay(null);
   }
 
@@ -645,6 +717,18 @@ class Game {
     this.ui.update(dt);
     this.mouseWorld = this.input.toWorld();
 
+    /* 触屏：首次触摸自动切换模式；瞄准摇杆直接改写成世界瞄准点 */
+    if (this.input.touch.active && !this.touchMode) this._enableTouchMode();
+    if (this.touchMode) {
+      const ad = this.input.aimDir();
+      if (ad && this.player) {
+        this.mouseWorld = {
+          x: this.player.x + ad.x * 300,
+          y: this.player.y + ad.y * 300
+        };
+      }
+    }
+
     if (this.input.wasPressed('KeyF')) this.toggleFullscreen();
 
     if (this.state === 'title') {
@@ -758,6 +842,7 @@ class Game {
     this.ui.drawBanner(ctx);
     if (this.state !== 'title') this.ui.drawHUD(ctx);
     if (this.state === 'playing' && !this.transition) this.ui.drawCrosshair(ctx);
+    if (this.touchMode) this.ui.drawTouchControls(ctx);
   }
 
   /* ---------------------------------------------------------

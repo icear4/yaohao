@@ -8,6 +8,8 @@
 html, body {
   margin: 0;
   padding: 0;
+  position: fixed;
+  inset: 0;
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -16,6 +18,10 @@ html, body {
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;             /* 禁掉移动端滑动/缩放手势 */
+  overscroll-behavior: none;
 }
 
 body {
@@ -27,9 +33,14 @@ body {
 }
 
 #stage {
-  position: relative;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin-left: -640px;
+  margin-top: -360px;
   width: 1280px;
   height: 720px;
+  transform-origin: 50% 50%;      /* 由 JS 设置 scale，永远等比不拉伸 */
   border-radius: 10px;
   overflow: hidden;
   box-shadow:
@@ -39,12 +50,20 @@ body {
   background: #05070c;
 }
 
+/* 触屏（手机 / 平板）：铺满整屏，去掉桌面装饰 */
+body.touch-mode #stage {
+  border-radius: 0;
+  box-shadow: none;
+}
+body.touch-mode #fs-btn { display: none; }
+
 #game-canvas {
   display: block;
   width: 100%;
   height: 100%;
   cursor: none;
   image-rendering: auto;
+  touch-action: none;
 }
 
 #ui-layer {
@@ -187,4 +206,84 @@ body {
 #seed-input:focus {
   border-color: rgba(255, 190, 100, 0.7);
   box-shadow: 0 0 12px rgba(255, 170, 60, 0.22);
+}
+
+/* ===========================================================
+   竖屏提示（在 #stage 之外，不随画布缩放）
+   =========================================================== */
+#rotate-hint {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(3, 5, 9, 0.94);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+#rotate-hint.hidden { display: none; }
+
+.rh-box {
+  width: min(420px, 86%);
+  padding: 30px 26px 24px;
+  text-align: center;
+  border: 1px solid rgba(255, 168, 76, 0.22);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(18, 22, 30, .95) 0%, rgba(9, 12, 17, .97) 100%);
+}
+.rh-icon {
+  font-size: 46px;
+  line-height: 1;
+  color: #ffcf8a;
+  animation: rh-rotate 2.4s ease-in-out infinite;
+}
+@keyframes rh-rotate {
+  0%, 45% { transform: rotate(0deg); }
+  70%, 100% { transform: rotate(90deg); }
+}
+.rh-title {
+  margin-top: 16px;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: #ffcf8a;
+}
+.rh-sub {
+  margin-top: 8px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: #9fb0c0;
+}
+#rh-btn {
+  margin-top: 20px;
+  padding: 10px 26px;
+  font: 700 14px/1 "Segoe UI", "PingFang SC", system-ui, sans-serif;
+  letter-spacing: 2px;
+  color: #7fd7ea;
+  background: rgba(12, 26, 34, 0.8);
+  border: 1px solid rgba(90, 190, 215, 0.4);
+  border-radius: 8px;
+}
+
+/* ===========================================================
+   小屏排版：舞台整体被 scale 缩小，这里按比例放大字号补偿
+   =========================================================== */
+@media (max-height: 560px) {
+  .panel { width: min(760px, 90%); padding: 22px 28px 20px; }
+  .ov-kicker { font-size: 13px; margin-bottom: 10px; }
+  .ov-title-cn { font-size: 60px; letter-spacing: 12px; }
+  .ov-title-en { font-size: 17px; letter-spacing: 9px; }
+  .ov-text { font-size: 18px; line-height: 1.75; margin: 16px auto 18px; max-width: 600px; }
+  .primary-btn { padding: 16px 42px; font-size: 20px; }
+  #seed-input { width: 300px; padding: 12px 14px; font-size: 16px; }
+  .ov-hint { font-size: 15px; margin-top: 14px; }
+}
+
+@media (max-width: 560px) {
+  .panel { width: 92%; padding: 24px 22px 20px; }
+  .ov-title-cn { font-size: 46px; letter-spacing: 6px; }
+  .ov-text { font-size: 15px; max-width: none; }
+  #seed-input { width: 86%; }
+  .primary-btn { padding: 14px 30px; font-size: 17px; }
 }

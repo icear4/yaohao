@@ -11,6 +11,8 @@ class Input {
     this.pressed = new Set();    // 本帧刚按下（每帧末清空）
     this.mouse = { cx: 0, cy: 0, down: false };
     this.mouseWorld = { x: VIEW_W * 0.5, y: VIEW_H * 0.5 };
+    this._mv = { x: 0, y: 0 };   // moveVector 的复用对象
+    this.touch = new TouchControls(canvas);
     this._bind();
   }
 
@@ -32,6 +34,7 @@ class Input {
     window.addEventListener('blur', () => {
       this.keys.clear();
       this.mouse.down = false;
+      if (this.touch) this.touch.releaseAll();
       if (this.onBlur) this.onBlur();
     });
 
@@ -58,6 +61,37 @@ class Input {
 
   isDown(code) { return this.keys.has(code); }
   wasPressed(code) { return this.pressed.has(code); }
+
+  /* 移动向量：键盘方向键 / WASD 与虚拟摇杆合并，结果已归一化（长度 <= 1） */
+  moveVector() {
+    let mx = 0, my = 0;
+    if (this.isDown('KeyA') || this.isDown('ArrowLeft')) mx -= 1;
+    if (this.isDown('KeyD') || this.isDown('ArrowRight')) mx += 1;
+    if (this.isDown('KeyW') || this.isDown('ArrowUp')) my -= 1;
+    if (this.isDown('KeyS') || this.isDown('ArrowDown')) my += 1;
+
+    const t = this.touch;
+    if (t && t.move.active) { mx += t.move.x; my += t.move.y; }
+
+    const len = Math.hypot(mx, my);
+    if (len > 1) { mx /= len; my /= len; }
+    this._mv.x = mx; this._mv.y = my;
+    return this._mv;
+  }
+
+  /* 是否正在开火：鼠标左键 或 瞄准摇杆按住 */
+  firing() {
+    return this.mouse.down || !!(this.touch && this.touch.firing);
+  }
+
+  /* 触屏瞄准方向（单位向量），未使用摇杆时返回 null */
+  aimDir() {
+    const t = this.touch;
+    if (!t || !t.aim.active) return null;
+    if (t.aim.x === 0 && t.aim.y === 0) return null;
+    const len = Math.hypot(t.aim.x, t.aim.y) || 1;
+    return { x: t.aim.x / len, y: t.aim.y / len };
+  }
 
   /* 把客户端坐标换算成逻辑世界坐标 */
   toWorld() {
