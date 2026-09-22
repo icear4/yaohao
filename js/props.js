@@ -61,10 +61,13 @@ class Prop {
    宝箱（Treasure）
    ----------------------------------------------------------- */
 class Chest extends Prop {
-  constructor(game, x, y, rng) {
+  constructor(game, x, y, rng, lesser) {
     super(game, x, y, { r: 22 });
     this.rng = rng;
-    this.item = pickUpgrade(rng, game.ownedItems || []);
+    this.lesser = !!lesser;
+    /* 道具来自数据驱动的道具表，按房间种子抽取 → 同 Seed 完全一致 */
+    const build = game.player ? game.player.build : null;
+    this.item = pickItem(rng, build, { synergy: true, early: (build ? build.length : 0) < 2 });
     this.label = '开启宝箱';
     this.openT = 0;
   }
@@ -72,10 +75,10 @@ class Chest extends Prop {
   use() {
     if (!super.use()) return false;
     const p = this.game.player;
-    this.item.apply(p);
-    this.game.ownedItems.push(this.item.id);
+    const got = p.gainItem(this.item.id);
+    if (!got) return false;                 // 已达堆叠上限
     this.game.addShake(3);
-    this.game.ui.showBanner(this.item.name, this.item.desc, 2.2);
+    this.game.ui.showBanner(got.name, got.desc, 2.6);
     this.game.damageNumbers.add(this.x, this.y - 30, this.item.name, {
       color: this.item.color, life: 1.3, vy: -40
     });
@@ -95,8 +98,9 @@ class Chest extends Prop {
   draw(ctx) {
     const t = this.animT;
     const open = this.openT;
-    this.drawBase(ctx, this.used ? '#5d6f7e' : '#ffd35e', 0.35);
-    if (!this.used) this.drawMarker(ctx, '#ffd35e');
+    const col = this.used ? '#5d6f7e' : this.item.color;
+    this.drawBase(ctx, col, 0.35);
+    if (!this.used) this.drawMarker(ctx, col);
 
     ctx.save();
     ctx.translate(this.x, this.y);
@@ -231,7 +235,7 @@ class Pedestal extends Prop {
     super(game, x, y, { r: 20 });
     this.rng = rng;
     this.cost = cost;
-    this.item = pickUpgrade(rng, game.ownedItems || []);
+    this.item = pickItem(rng, game.player ? game.player.build : null, { synergy: true });
     this.label = `购买 ${cost} 余烬`;
     this.denyT = 0;
   }
@@ -247,9 +251,9 @@ class Pedestal extends Prop {
     }
     this.used = true;
     this.game.embers -= this.cost;
-    this.item.apply(this.game.player);
-    this.game.ownedItems.push(this.item.id);
-    this.game.ui.showBanner(this.item.name, this.item.desc, 2.2);
+    const got = this.game.player.gainItem(this.item.id);
+    if (!got) { this.used = false; this.game.embers += this.cost; return false; }
+    this.game.ui.showBanner(got.name, got.desc, 2.6);
     this.game.damageNumbers.add(this.x, this.y - 30, this.item.name, {
       color: this.item.color, life: 1.3, vy: -40
     });

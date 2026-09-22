@@ -258,7 +258,12 @@ class Room {
     const rng = this.rng;
     switch (this.type) {
       case ROOM_TYPE.TREASURE:
-        this.props.push(new Chest(this.game, cx, cy, rng.fork('chest')));
+        /* 主宝箱居中；第 2 层起两侧各多一口小箱 */
+        this.props.push(new Chest(this.game, cx, cy, rng.fork('chest'), false));
+        if (this.depth >= 1) {
+          this.props.push(new Chest(this.game, cx - 190, cy + 40, rng.fork('chestL'), true));
+          this.props.push(new Chest(this.game, cx + 190, cy + 40, rng.fork('chestR'), true));
+        }
         break;
       case ROOM_TYPE.EVENT:
         this.props.push(new Shrine(this.game, cx, cy, rng.fork('shrine')));
@@ -367,6 +372,18 @@ class Room {
     }
   }
 
+  /* ---------------------------------------------------------
+     重新进入（复用实例时调用）：只重置瞬时表现，绝不重建敌人 / 物件
+     --------------------------------------------------------- */
+  onReenter() {
+    this.spawnFx = 0;
+    if (this.state === 'fighting') {
+      /* 战斗未结束就返回（理论上门是关的）：重新锁门 */
+      this.doorsOpen = false;
+      this.clearTime = 0;
+    }
+  }
+
   markCleared() {
     if (this.state === 'clear') return;
     this.state = 'clear';
@@ -374,9 +391,12 @@ class Room {
     this.clearTime = 0;
     this.everCleared = true;
 
-    /* Boss 房通关 → 生成层间裂隙 */
+    /* Boss 房通关 → 生成层间裂隙；精英房通关 → 掉落宝箱 */
     if (this.type === ROOM_TYPE.BOSS) {
       this.props.push(new Portal(this.game, ARENA.x + ARENA.w / 2, ARENA.y + ARENA.h / 2));
+    } else if (this.type === ROOM_TYPE.ELITE) {
+      this.props.push(new Chest(this.game, ARENA.x + ARENA.w / 2, ARENA.y + ARENA.h / 2,
+        this.rng.fork('eliteChest'), false));
     }
     this.game.onRoomCleared(this);
   }
@@ -392,6 +412,25 @@ class Room {
   hitsWall(x, y, r) {
     for (const w of this.wallsClosed) {
       if (Collision.circleRect(x, y, r, w)) return true;
+    }
+    return false;
+  }
+
+  /* 投射物撞墙反弹：就地修改 vx / vy 并推出墙体，返回是否发生反弹 */
+  bounceOffWalls(p) {
+    for (const w of this.wallsClosed) {
+      if (!Collision.circleRect(p.x, p.y, p.r, w)) continue;
+      const overLeft = (p.x + p.r) - w.x;
+      const overRight = (w.x + w.w) - (p.x - p.r);
+      const overTop = (p.y + p.r) - w.y;
+      const overBottom = (w.y + w.h) - (p.y - p.r);
+      const m = Math.min(overLeft, overRight, overTop, overBottom);
+      /* overLeft = 需要向左挪多少才能脱离左面，以此类推 */
+      if (m === overLeft) { p.vx = -Math.abs(p.vx); p.x -= overLeft; }
+      else if (m === overRight) { p.vx = Math.abs(p.vx); p.x += overRight; }
+      else if (m === overTop) { p.vy = -Math.abs(p.vy); p.y -= overTop; }
+      else { p.vy = Math.abs(p.vy); p.y += overBottom; }
+      return true;
     }
     return false;
   }

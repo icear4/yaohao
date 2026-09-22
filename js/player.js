@@ -11,21 +11,44 @@ class Player {
     this.y = y;
     this.r = 15;
 
-    /* ---- 属性 ---- */
-    this.maxHp = 100;
-    this.hp = 100;
-    this.moveSpeed = 262;
-    this.damage = 11;
-    this.fireInterval = 0.17;
-    this.bulletSpeed = 660;
-    this.bulletRadius = 5;
-    this.bulletCount = 1;
-    this.critChance = 0.08;
+    /* ---- 基础属性（道具系统的叠加基准，只在这里写一次） ---- */
+    this.base = {
+      maxHp: 100,
+      damage: 11,
+      fireInterval: 0.17,
+      moveSpeed: 262,
+      bulletSpeed: 660,
+      bulletRadius: 5,
+      bulletCount: 1,
+      critChance: 0.08,
+      critDamage: 2.0,
+      range: 1060,
+      invulnTime: 0.9
+    };
+
+    /* ---- 属性（由 Build.recompute() 每次重新写入） ---- */
+    this.maxHp = this.base.maxHp;
+    this.hp = this.base.maxHp;
+    this.moveSpeed = this.base.moveSpeed;
+    this.damage = this.base.damage;
+    this.fireInterval = this.base.fireInterval;
+    this.bulletSpeed = this.base.bulletSpeed;
+    this.bulletRadius = this.base.bulletRadius;
+    this.bulletCount = this.base.bulletCount;
+    this.critChance = this.base.critChance;
+    this.critDamage = this.base.critDamage;
+    this.range = this.base.range;
+    this.armor = 0;
+    this.regen = 0;
+
+    /* ---- Build（道具 / 组合） ---- */
+    this.build = new Build(this);
+    this.mods = this.build.mods;
 
     /* ---- 运行时状态 ---- */
     this.fireTimer = 0;
     this.invuln = 0;
-    this.invulnTime = 0.9;
+    this.invulnTime = this.base.invulnTime;
     this.aim = -Math.PI / 2;
     this.moving = false;
     this.walkPhase = 0;
@@ -33,6 +56,15 @@ class Player {
     this.hurtFlash = 0;
     this.dead = false;
     this.shotsFired = 0;
+    this.trailT = 0;      // 烬迹计时
+  }
+
+  /* 拾取道具（所有入口统一走这里） */
+  gainItem(itemId) {
+    const it = this.build.add(itemId);
+    if (!it) return null;
+    this.game.ownedItems.push(itemId);
+    return it;
   }
 
   get alive() { return !this.dead; }
@@ -72,6 +104,25 @@ class Player {
     const m = this.game.mouseWorld;
     this.aim = angleTo(this.x, this.y, m.x, m.y);
 
+    /* 生命回复 */
+    if (this.regen > 0 && this.hp > 0 && this.hp < this.maxHp) {
+      this._regenAcc = (this._regenAcc || 0) + this.regen * dt;
+      if (this._regenAcc >= 1) {
+        const g = Math.floor(this._regenAcc);
+        this._regenAcc -= g;
+        this.hp = Math.min(this.maxHp, this.hp + g);
+      }
+    }
+
+    /* 烬迹：身周持续灼烧 */
+    if (this.mods.trailFire > 0) {
+      this.trailT -= dt;
+      if (this.trailT <= 0) {
+        this.trailT = 0.3;
+        this.game.burnAround(this.x, this.y, 66, this.mods.trailFire * 3);
+      }
+    }
+
     /* 射击 */
     this.fireTimer -= dt;
     this.recoil = Math.max(0, this.recoil - dt * 9);
@@ -92,15 +143,20 @@ class Player {
      射击
      --------------------------------------------------------- */
   shoot() {
-    const spreadTotal = this.bulletCount > 1 ? 0.11 * (this.bulletCount - 1) : 0;
+    const m = this.mods;
+    const n = this.bulletCount;
+    const spreadTotal = n > 1 ? 0.11 * (n - 1) : 0;
     const start = this.aim - spreadTotal * 0.5;
     const muzzleLen = this.r + 8;
+    const life = this.range / this.bulletSpeed;
+    const eff = this.build.shotEffects();
 
-    for (let i = 0; i < this.bulletCount; i++) {
-      const a = this.bulletCount > 1 ? start + (spreadTotal / (this.bulletCount - 1)) * i : this.aim;
+    for (let i = 0; i < n; i++) {
+      const a = n > 1 ? start + (spreadTotal / (n - 1)) * i : this.aim;
       const px = this.x + Math.cos(a) * muzzleLen;
       const py = this.y + Math.sin(a) * muzzleLen;
-      this.game.spawnProjectile({
+
+      const opt = {
         x: px, y: py,
         angle: a,
         speed: this.bulletSpeed,
@@ -109,8 +165,23 @@ class Player {
         friendly: true,
         color: '#ffb347',
         core: '#fff6da',
-        life: 1.6
-      });
+        life: life,
+        game: this.game,
+        spin: m.orbit > 0 ? 9 : 0
+      };
+      /* 机制快照：一次拷贝，之后与 Build 解耦 */
+      for (const k in eff) opt[k] = eff[k];
+      opt.splitLeft = m.split;          // 剩余可分裂次数
+      opt.isChild = false;
+      opt.damageMul = 1;
+
+      /* 外观随机制变化 */
+      if (m.poison > 0) { opt.color = '#9ad14f'; opt.core = '#e8ffb0'; }
+      else if (m.freeze > 0) { opt.color = '#8fd8ff'; opt.core = '#ffffff'; }
+      else if (m.homing > 0) { opt.color = '#7fe4ff'; }
+      else if (m.explode > 0) { opt.color = '#ff8a5c'; }
+
+      this.game.spawnProjectile(opt);
     }
 
     this.shotsFired++;
@@ -129,7 +200,8 @@ class Player {
   takeDamage(amount, srcX, srcY) {
     if (this.dead || this.invuln > 0) return false;
 
-    this.hp -= amount;
+    const real = Math.max(1, Math.round(amount - (this.armor || 0)));
+    this.hp -= real;
     this.invuln = this.invulnTime;
     this.hurtFlash = 1;
     this.game.addShake(7);

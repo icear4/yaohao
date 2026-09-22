@@ -23,6 +23,8 @@ class Game {
     this.transition = null;
     this.mouseWorld = { x: VIEW_W / 2, y: VIEW_H / 2 };
     this.nearProp = null;
+    this.fx = [];                // 电弧等短时特效
+    this.zones = [];             // 泥沼等持续区域
 
     /* 种子 / 层数 / 货币 / 已获得道具 */
     this.seed = randomSeedString();
@@ -34,10 +36,14 @@ class Game {
     this._fpsAcc = 0;
     this._fpsFrames = 0;
 
+    /* 已实例化的房间缓存：key = floor#c,r
+       → 重新进入已探索的房间时复用同一实例，敌人 / 宝箱 / 状态都不会刷新 */
+    this.roomCache = {};
+
     /* 首屏也要有一张地图和房间（标题界面背景） */
     this.map = new GameMap(this.seed, this.floor);
     this.player = new Player(this, VIEW_W / 2, VIEW_H / 2 + 90);
-    this.room = this._createRoom(this.map.start);
+    this.room = this._roomFor(this.map.start);
     this.map.current = this.map.start;
     this.map.visit(this.map.start);
 
@@ -90,18 +96,21 @@ class Game {
     this.embers = 0;
     this.ownedItems = [];
     this.projectiles.length = 0;
+    this.fx.length = 0;
+    this.zones.length = 0;
     this.particles.clear();
     this.damageNumbers.clear();
     this.transition = null;
     this.shake = 0;
     this.nearProp = null;
+    this.roomCache = {};
 
     this.player = new Player(this, VIEW_W / 2, VIEW_H / 2 + 90);
     this.map = new GameMap(this.seed, this.floor);
     this.state = 'playing';
     this.ui.setOverlay(null);
 
-    this.room = this._createRoom(this.map.start);
+    this.room = this._roomFor(this.map.start);
     this.map.current = this.map.start;
     this.map.visit(this.map.start);
     this._placePlayerAtEntry('bottom');
@@ -147,6 +156,15 @@ class Game {
     if (e.isBoss) drop = 40;
     this.embers += drop;
     this.damageNumbers.add(e.x, e.y - 14, '◈' + drop, { color: '#ffd35e', life: 0.9, vy: -46 });
+
+    /* 击杀类组合 */
+    const m = (this.player && this.player.mods) ? this.player.mods : {};
+    if (m.killBlast > 0) {
+      this._explode(e.x, e.y, 56 + 12 * m.killBlast, 12 * m.killBlast, { color: '#ffd35e' });
+    }
+    if (m.freezeExplode > 0 && e.freezeT > 0) {
+      this._explode(e.x, e.y, 82, 24, { color: '#8fd8ff', freeze: true });
+    }
   }
 
   onRoomCleared(room) {
@@ -164,10 +182,13 @@ class Game {
     this.floor++;
     this.transition = null;
     this.projectiles.length = 0;
+    this.fx.length = 0;
+    this.zones.length = 0;
     this.particles.clear();
     this.damageNumbers.clear();
+    this.roomCache = {};
     this.map = new GameMap(this.seed, this.floor);
-    this.room = this._createRoom(this.map.start);
+    this.room = this._roomFor(this.map.start);
     this.map.current = this.map.start;
     this.map.visit(this.map.start);
     this._placePlayerAtEntry('bottom');
@@ -196,6 +217,17 @@ class Game {
     });
   }
 
+  /* 取（或首次创建）房间实例：已存在则复用，保证房间状态持久化 */
+  _roomFor(cell) {
+    const key = this.floor + '#' + cell.c + ',' + cell.r;
+    let room = this.roomCache[key];
+    if (!room) {
+      room = this._createRoom(cell);
+      this.roomCache[key] = room;
+    }
+    return room;
+  }
+
   _placePlayerAtEntry(side) {
     const pos = this._entryPosition(side);
     this.player.x = pos.x;
@@ -216,24 +248,39 @@ class Game {
   }
 
   _enterCell(cell, fromSide) {
+    const alreadyVisited = this.map.isVisited(cell);
     this.map.current = cell;
     this.map.visit(cell);
     this.projectiles.length = 0;
     this.particles.clear();
     this.damageNumbers.clear();
-    this.room = this._createRoom(cell);
+
+    /* 复用已有房间实例：已清空的房间不会再刷敌人，已开过的宝箱不会重置 */
+    this.room = this._roomFor(cell);
+    this.room.onReenter();
     this._placePlayerAtEntry(fromSide ? OPPOSITE_DOOR[fromSide] : 'bottom');
 
     const meta = ROOM_META[cell.type];
-    let sub = '';
-    if (cell.type === ROOM_TYPE.BOSS) sub = '守望者就在前方';
+    let sub;
+    if (alreadyVisited) {
+      if (cell.type === ROOM_TYPE.BOSS && this.room.state === 'clear') {
+        sub = '守望者已陨落 · 触碰裂隙进入下一层';
+      } else if (this.room.isCombatRoom && this.room.state !== 'clear') {
+        sub = '返回之前的房间 · 战斗继续';
+      } else if (cell.type === ROOM_TYPE.TREASURE || cell.type === ROOM_TYPE.SHOP ||
+                 cell.type === ROOM_TYPE.EVENT) {
+        sub = '已探索 · 开启过的物件保持原样';
+      } else {
+        sub = '已探索 · 房间保持清空状态';
+      }
+    } else if (cell.type === ROOM_TYPE.BOSS) sub = '守望者就在前方';
     else if (cell.type === ROOM_TYPE.TREASURE) sub = '按 E 开启宝箱';
     else if (cell.type === ROOM_TYPE.SHOP) sub = '按 E 购买强化';
     else if (cell.type === ROOM_TYPE.EVENT) sub = '按 E 触碰异象';
     else if (cell.type === ROOM_TYPE.ELITE) sub = '强力残形盘踞';
     else if (cell.type === ROOM_TYPE.START) sub = '走进门洞开始探索';
     else sub = '击败所有残形，门才会开启';
-    this.ui.showBanner(meta.cn, sub, 1.5);
+    this.ui.showBanner(meta.cn, sub, alreadyVisited ? 1.2 : 1.5);
   }
 
   /* 走进门洞 → 摄像机滑向相邻房间 */
@@ -260,6 +307,237 @@ class Game {
     return p;
   }
 
+  /* =========================================================
+     道具机制的战斗结算
+     ========================================================= */
+
+  /* 命中敌人：吸血 / 状态 / 击退 */
+  _onHit(p, e, dmg, crit) {
+    const player = this.player;
+    if (p.burn > 0) e.applyStatus('burn', p.burn);
+    if (p.poison > 0) e.applyStatus('poison', p.poison);
+    if (p.slow > 0) e.applyStatus('slow', p.slow);
+    if (p.freeze > 0 && chance(Math.min(0.75, 0.18 * p.freeze))) e.applyStatus('freeze', p.freeze);
+
+    if (p.knockback > 0) {
+      const ang = angleTo(p.x, p.y, e.x, e.y);
+      const boost = (p.slowKnock > 0 && e.slowT > 0) ? 2 : 1;
+      const force = 130 * p.knockback * boost;
+      e.kx += Math.cos(ang) * force;
+      e.ky += Math.sin(ang) * force;
+    }
+
+    if (p.lifesteal > 0 && !player.dead) {
+      const mul = (crit && p.critVamp > 0) ? 3 : 1;
+      player._lsAcc = (player._lsAcc || 0) + dmg * 0.08 * p.lifesteal * mul;
+      if (player._lsAcc >= 1) {
+        const g = Math.floor(player._lsAcc);
+        player._lsAcc -= g;
+        player.hp = Math.min(player.maxHp, player.hp + g);
+      }
+    }
+  }
+
+  /* 子弹结束使命（命中或寿命耗尽）时的一次性结算 */
+  _bulletImpact(p, x, y, dmg, hitEnemy) {
+    if (p.explode > 0) {
+      const radius = 48 + 14 * p.explode + (p.homingExplode > 0 ? 22 : 0);
+      this._explode(x, y, radius, dmg, {
+        color: p.color,
+        burn: p.burnExplode > 0 ? Math.max(1, p.burn) : 0,
+        slow: p.slowExplode > 0,
+        zone: p.slowExplode > 0
+      });
+    }
+    if (p.split > 0 && p.splitLeft > 0) {
+      this._spawnSplit(p, x, y, Math.atan2(p.vy, p.vx));
+    }
+    if (p.chain > 0) this._chain(p, x, y, dmg);
+  }
+
+  /* 范围爆炸 */
+  _explode(x, y, radius, dmg, opt) {
+    opt = opt || {};
+    const color = opt.color || '#ff8a5c';
+    this.particles.ring(x, y, color, Math.round(radius * 0.45), radius * 3.2);
+    this.particles.burst(x, y, 16, {
+      speed: 260, life: 0.55, size: 5, colors: [color, '#ffffff', '#ffd35e']
+    });
+    this.addShake(2.6);
+
+    const mul = opt.dmgMul === undefined ? 0.6 : opt.dmgMul;
+    const amount = Math.max(1, Math.round(dmg * mul));
+    const list = this.room ? this.room.enemies : [];
+    for (const e of list) {
+      if (e.dead) continue;
+      if (dist2(x, y, e.x, e.y) > radius * radius) continue;
+      e.takeDamage(amount, x, y);
+      this.damageNumbers.add(e.x, e.y - e.r - 6, amount, { color: color });
+      if (opt.freeze) e.applyStatus('freeze', 1);
+      if (opt.slow) e.applyStatus('slow', 1);
+      if (opt.burn) e.applyStatus('burn', opt.burn);
+    }
+    if (opt.zone) this.zones.push({ x: x, y: y, r: radius * 0.9, life: 2.5, t: 0 });
+  }
+
+  /* 分裂碎片 */
+  _spawnSplit(p, x, y, baseAngle) {
+    const n = Math.min(8, p.split);
+    const proto = defaultMods();
+    for (let i = 0; i < n; i++) {
+      const a = baseAngle + (i - (n - 1) / 2) * 0.44;
+      const opt = {
+        x: x, y: y, angle: a, speed: p.speed * 0.9,
+        damage: p.damage, r: Math.max(2.5, p.r * 0.76),
+        friendly: true, color: p.color, core: p.core,
+        life: 0.85, game: this, splitLeft: 0, isChild: true
+      };
+      for (const k in proto) opt[k] = 0;
+      opt.damageMul = (p.damageMul || 1) * 0.55;
+      /* 毒素完整继承（毒染裂片）或减半继承 */
+      opt.poison = p.poisonSplit > 0 ? p.poison : Math.ceil(p.poison / 2);
+      opt.burn = p.burn;
+      opt.slow = p.slow;
+      opt.freeze = p.freeze;
+      opt.knockback = p.knockback;
+      opt.lifesteal = p.lifesteal;
+      opt.homing = (p.splitHoming > 0 || p.homing > 0) ? Math.max(1, p.homing) : 0;
+      this.spawnProjectile(opt);
+    }
+    this.particles.burst(x, y, 6, { speed: 150, life: 0.3, size: 3, color: p.color });
+  }
+
+  /* 链式电弧 */
+  _chain(p, x, y, dmg) {
+    const jumps = Math.min(4, p.chain);
+    const color = p.chainBurn > 0 ? '#ff9d3c' : (p.chainPoison > 0 ? '#9ad14f' : '#7fe4ff');
+    const used = [];
+    let cx = x, cy = y;
+    const list = this.room ? this.room.enemies : [];
+    for (let j = 0; j < jumps; j++) {
+      let best = null, bestD = 260 * 260;
+      for (const e of list) {
+        if (e.dead || used.indexOf(e) >= 0) continue;
+        const d = dist2(cx, cy, e.x, e.y);
+        if (d < bestD) { bestD = d; best = e; }
+      }
+      if (!best) break;
+      this._zap(cx, cy, best.x, best.y, color);
+      const amount = Math.max(1, Math.round(dmg * 0.55));
+      best.takeDamage(amount, cx, cy);
+      this.damageNumbers.add(best.x, best.y - best.r - 6, amount, { color: color });
+      if (p.chainPoison > 0) best.applyStatus('poison', Math.max(1, Math.ceil(p.poison / 2)));
+      if (p.chainBurn > 0) best.applyStatus('burn', Math.max(1, Math.ceil(p.burn / 2)));
+      if (p.chainExplode > 0 && p.explode > 0) {
+        this._explode(best.x, best.y, 40 + 14 * p.explode, amount, { color: color });
+      }
+      used.push(best);
+      cx = best.x; cy = best.y;
+    }
+  }
+
+  _zap(x1, y1, x2, y2, color) {
+    this.fx.push({ type: 'zap', x1: x1, y1: y1, x2: x2, y2: y2, life: 0.18, max: 0.18, color: color || '#7fe4ff' });
+  }
+
+  /* 烬迹：身周灼烧 */
+  burnAround(x, y, radius, dmg) {
+    const list = this.room ? this.room.enemies : [];
+    for (const e of list) {
+      if (e.dead) continue;
+      if (dist2(x, y, e.x, e.y) > radius * radius) continue;
+      e.applyStatus('burn', 1);
+      e.takeDot(Math.max(1, Math.round(dmg)), this.player);
+    }
+    if (Math.random() < 0.6) {
+      this.particles.spawn(x + rand(-14, 14), y + rand(-8, 14), rand(-16, 16), rand(-60, -24),
+        rand(0.25, 0.5), rand(2, 4), '#ff9d3c', { drag: 2.4 });
+    }
+  }
+
+  _updateFx(dt) {
+    for (let i = this.fx.length - 1; i >= 0; i--) {
+      this.fx[i].life -= dt;
+      if (this.fx[i].life <= 0) this.fx.splice(i, 1);
+    }
+    for (let i = this.zones.length - 1; i >= 0; i--) {
+      const z = this.zones[i];
+      z.life -= dt;
+      z.t += dt;
+      if (z.life <= 0) { this.zones.splice(i, 1); continue; }
+      const list = this.room ? this.room.enemies : [];
+      for (const e of list) {
+        if (e.dead) continue;
+        if (dist2(z.x, z.y, e.x, e.y) > z.r * z.r) continue;
+        e.applyStatus('slow', 1);
+        e.takeDot(6 * dt, this.player);
+      }
+    }
+  }
+
+  _drawZones(ctx) {
+    for (const z of this.zones) {
+      const a = 0.10 + 0.05 * Math.sin(z.t * 4);
+      const g = ctx.createRadialGradient(z.x, z.y, 4, z.x, z.y, z.r);
+      g.addColorStop(0, `rgba(90,169,255,${a + 0.10})`);
+      g.addColorStop(1, 'rgba(90,169,255,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(z.x, z.y, z.r, 0, TAU);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(140,210,255,0.35)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }
+
+  _drawFx(ctx) {
+    for (const f of this.fx) {
+      const a = clamp(f.life / f.max, 0, 1);
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.strokeStyle = f.color;
+      ctx.lineWidth = 3.5;
+      ctx.shadowColor = f.color;
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      /* 折线电弧 */
+      const seg = 5;
+      ctx.moveTo(f.x1, f.y1);
+      for (let i = 1; i < seg; i++) {
+        const t = i / seg;
+        const nx = lerp(f.x1, f.x2, t) + rand(-7, 7);
+        const ny = lerp(f.y1, f.y2, t) + rand(-7, 7);
+        ctx.lineTo(nx, ny);
+      }
+      ctx.lineTo(f.x2, f.y2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  _drawStatusRing(ctx, e) {
+    let color = null;
+    if (e.freezeT > 0) color = '#8fd8ff';
+    else if (e.burnT > 0 && e.burnStack >= e.poisonStack) color = '#ff9d3c';
+    else if (e.poisonT > 0) color = '#9ad14f';
+    else if (e.slowT > 0) color = '#5aa9ff';
+    if (!color) return;
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.r + 5, 0, TAU);
+    ctx.stroke();
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.r + 3, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
   _updateProjectiles(dt) {
     const room = this.room;
     const player = this.player;
@@ -268,9 +546,31 @@ class Game {
       const p = this.projectiles[i];
       p.update(dt);
 
-      if (p.dead) { this.projectiles.splice(i, 1); continue; }
+      if (p.dead) {
+        if (p.friendly && p.explode > 0) {
+          const dmg = p.damage * (p.damageMul || 1);
+          this._explode(p.x, p.y, 48 + 14 * p.explode, dmg, { color: p.color });
+        }
+        this.projectiles.splice(i, 1);
+        continue;
+      }
 
+      /* 撞墙：反弹或消散 */
       if (room.hitsWall(p.x, p.y, p.r)) {
+        const boomerang = p.orbit > 0;      // 回旋弹永远不会被墙吃掉
+        if (p.bounce > 0 || boomerang) {
+          room.bounceOffWalls(p);
+          if (p.bounce > 0) p.bounce--;
+          this.particles.burst(p.x, p.y, 4, {
+            speed: 140, life: 0.24, size: 3, color: p.color, drag: 6
+          });
+          if (p.bounceHoming > 0) { p.homing = Math.max(1, p.homing); p.hitIds.length = 0; }
+          if (p.endlessRefract > 0) p.pierce = Math.max(1, p.pierce);
+          if (p.bounceExplode > 0 && p.explode > 0) {
+            this._explode(p.x, p.y, 42 + 14 * p.explode, p.damage * (p.damageMul || 1), { color: p.color });
+          }
+          continue;
+        }
         this.particles.burst(p.x, p.y, 5, {
           speed: 130, life: 0.26, size: 3, color: p.color, drag: 6
         });
@@ -282,13 +582,18 @@ class Game {
         let hit = null;
         for (const e of room.enemies) {
           if (e.dead) continue;
+          if (p.hitIds.indexOf(e) >= 0) continue;
           if (Collision.circleCircle(p.x, p.y, p.r, e.x, e.y, e.r)) { hit = e; break; }
         }
         if (hit) {
-          let dmg = p.damage;
           const crit = chance(player.critChance);
-          if (crit) dmg = Math.round(dmg * 2);
+          let dmg = p.damage * (p.damageMul || 1);
+          if (crit) dmg *= player.critDamage;
+          dmg = Math.max(1, Math.round(dmg));
+
           hit.takeDamage(dmg, p.x, p.y);
+          this._onHit(p, hit, dmg, crit);
+
           this.damageNumbers.add(hit.x, hit.y - hit.r - 6, dmg, { crit: crit });
           this.particles.burst(p.x, p.y, crit ? 9 : 4, {
             speed: 180, life: 0.3, size: 3.2,
@@ -296,6 +601,21 @@ class Game {
             dir: Math.atan2(p.vy, p.vx) + Math.PI, spread: 1.7
           });
           if (crit) this.addShake(2.4);
+
+          /* 穿透 / 回旋：继续飞行 */
+          if (p.pierce > 0 || p.orbit > 0) {
+            p.hitIds.push(hit);
+            if (p.pierce > 0 && !(p.orbitPierce > 0)) p.pierce--;
+            if (p.burnPierce > 0) hit.applyStatus('burn', 1);
+            if (p.freezePierce > 0) hit.applyStatus('freeze', Math.max(1, p.freeze));
+            if (p.pierceSplit > 0 && p.splitLeft > 0) {
+              this._spawnSplit(p, hit.x, hit.y, Math.atan2(p.vy, p.vx));
+              p.splitLeft--;
+            }
+            continue;
+          }
+
+          this._bulletImpact(p, hit.x, hit.y, dmg, hit);
           this.projectiles.splice(i, 1);
           continue;
         }
@@ -363,6 +683,7 @@ class Game {
     this.player.update(dt, this.input);
     this.room.update(dt);
     this._updateProjectiles(dt);
+    this._updateFx(dt);
     this.particles.update(dt);
     this.damageNumbers.update(dt);
     this.shake = Math.max(0, this.shake - dt * 45);
@@ -389,11 +710,14 @@ class Game {
   _drawRoomScene(room, withPlayer) {
     const ctx = this.ctx;
     room.drawFloor(ctx);
+    this._drawZones(ctx);
     room.drawProps(ctx);
     for (const e of room.enemies) e.draw(ctx);
+    for (const e of room.enemies) if (e.hasStatus()) this._drawStatusRing(ctx, e);
     if (withPlayer) {
       this.player.draw(ctx);
       for (const p of this.projectiles) p.draw(ctx);
+      this._drawFx(ctx);
       this.particles.draw(ctx);
       this.damageNumbers.draw(ctx);
     }

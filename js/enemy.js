@@ -41,6 +41,75 @@ class Enemy {
     this.spawnT = 0;
     this.spawnDur = 0.5;
     this.spawned = false;            // 出场动画完成
+
+    /* ---- 状态效果（由道具施加） ---- */
+    this.burnT = 0; this.burnStack = 0;
+    this.poisonT = 0; this.poisonStack = 0;
+    this.freezeT = 0;
+    this.slowT = 0; this.slowStack = 0;
+    this.baseSpeed = this.speed;
+    this.dotAcc = 0;
+  }
+
+  /* 施加状态：kind = burn | poison | freeze | slow，level = 层数 */
+  applyStatus(kind, level) {
+    if (this.dead || level <= 0) return;
+    if (kind === 'burn') { this.burnStack = Math.min(9, this.burnStack + level); this.burnT = 3.0; }
+    else if (kind === 'poison') { this.poisonStack = Math.min(12, this.poisonStack + level); this.poisonT = 4.0; }
+    else if (kind === 'freeze') { this.freezeT = Math.max(this.freezeT, 0.8 + 0.25 * level); }
+    else if (kind === 'slow') { this.slowStack = Math.min(5, this.slowStack + level); this.slowT = Math.max(this.slowT, 1.6); }
+  }
+
+  hasStatus() {
+    return this.burnT > 0 || this.poisonT > 0 || this.freezeT > 0 || this.slowT > 0;
+  }
+
+  /* 持续伤害（不触发击退与受击闪白） */
+  takeDot(amount, healer) {
+    if (this.dead || amount <= 0) return;
+    this.hp -= amount;
+    if (healer && healer.build) {
+      const m = healer.mods || {};
+      if (m.dotVamp > 0) healer.hp = Math.min(healer.maxHp, healer.hp + amount * 0.10);
+    }
+    if (this.hp <= 0) { this.hp = 0; this.die(); }
+  }
+
+  _updateStatus(dt) {
+    if (this.burnT > 0) this.burnT -= dt; else this.burnStack = 0;
+    if (this.poisonT > 0) this.poisonT -= dt; else this.poisonStack = 0;
+    if (this.freezeT > 0) this.freezeT -= dt;
+    if (this.slowT > 0) this.slowT -= dt; else this.slowStack = 0;
+
+    const dps = this.burnStack * 3.2 + this.poisonStack * 2.4;
+    if (dps > 0) {
+      this.dotAcc += dps * dt;
+      if (this.dotAcc >= 1) {
+        const tick = Math.floor(this.dotAcc);
+        this.dotAcc -= tick;
+        this.takeDot(tick, this.game.player);
+        if (Math.random() < 0.5) {
+          this.game.particles.spawn(
+            this.x + rand(-this.r, this.r), this.y + rand(-this.r, this.r),
+            rand(-20, 20), rand(-50, -20), rand(0.3, 0.6), rand(2, 3.4),
+            this.burnStack >= this.poisonStack ? '#ff9d3c' : '#9ad14f', { drag: 2 }
+          );
+        }
+      }
+    }
+
+    /* 速度倍率：冰冻结死，减速按比例 */
+    const slowMul = this.slowT > 0 ? Math.max(0.4, 1 - 0.15 * this.slowStack) : 1;
+    this.speed = this.baseSpeed * (this.freezeT > 0 ? 0 : slowMul);
+
+    /* 极寒领域：被冻结/减速的敌人向外散发寒气 */
+    if (this.game.player && this.game.player.mods &&
+        this.game.player.mods.frostField > 0 && (this.freezeT > 0 || this.slowT > 0)) {
+      for (const o of this.game.room.enemies) {
+        if (o === this || o.dead) continue;
+        if (dist2(this.x, this.y, o.x, o.y) < 110 * 110) o.applyStatus('slow', 1);
+      }
+    }
   }
 
   get spawnScale() {
@@ -55,6 +124,7 @@ class Enemy {
     this.hp = this.maxHp;
     this.touchDamage = Math.round(this.touchDamage * dmgMul);
     this.speed *= spdMul;
+    this.baseSpeed = this.speed;
     this.tier = tier;
   }
 
@@ -72,6 +142,20 @@ class Enemy {
     /* 出场动画期间不行动 */
     if (!this.spawned) {
       this.vx = 0; this.vy = 0;
+      return;
+    }
+
+    this._updateStatus(dt);
+    if (this.dead) return;
+
+    /* 冻结：完全停止行动（移动与攻击都被冻住） */
+    if (this.freezeT > 0) {
+      this.vx = 0; this.vy = 0;
+      const kd = Math.max(0, 1 - 9 * dt);
+      this.kx *= kd; this.ky *= kd;
+      this.x += this.kx * dt;
+      this.y += this.ky * dt;
+      this.game.room.clampEntity(this, false);
       return;
     }
 
@@ -95,9 +179,17 @@ class Enemy {
     if (!p || p.dead) return false;
     const reach = this.r + p.r + (extraRange || 2);
     if (dist2(this.x, this.y, p.x, p.y) <= reach * reach) {
-      p.takeDamage(amount, this.x, this.y);
+      const hurt = p.takeDamage(amount, this.x, this.y);
       this.touchTimer = this.touchInterval;
-      return true;
+      /* 烬刺外皮：近身接触时反弹伤害 */
+      const th = (p.mods && p.mods.thorns) || 0;
+      if (th > 0) {
+        this.takeDamage(th * 10, p.x, p.y);
+        this.game.particles.burst(this.x, this.y, 6, {
+          speed: 160, life: 0.3, size: 3, color: '#c8ff6a'
+        });
+      }
+      return hurt;
     }
     return false;
   }

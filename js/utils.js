@@ -38,6 +38,11 @@ function dist2(ax, ay, bx, by) {
 }
 function angleTo(ax, ay, bx, by) { return Math.atan2(by - ay, bx - ax); }
 
+/* 最短弧的角度差（b - a），范围 -PI..PI */
+function angleDelta(a, b) {
+  return ((b - a + Math.PI) % TAU + TAU) % TAU - Math.PI;
+}
+
 /* 角度插值（走最短弧） */
 function angleLerp(a, b, t) {
   let d = ((b - a + Math.PI) % TAU + TAU) % TAU - Math.PI;

@@ -26,6 +26,19 @@ class UI {
     this.setOverlay('title');
   }
 
+  /* 玩家当前 Build 的一句话摘要（遮罩面板用） */
+  buildSummary(g) {
+    if (!g.player || !g.player.build) return '';
+    const slots = g.player.build.slots;
+    if (!slots.length) return '尚无道具';
+    const names = slots.slice(0, 8).map(s => {
+      const it = ITEM_BY_ID[s.id];
+      return (it ? it.name : s.id) + (s.n > 1 ? `×${s.n}` : '');
+    });
+    const more = slots.length > 8 ? ` 等 ${slots.length} 类` : '';
+    return names.join('、') + more;
+  }
+
   /* ---------------------------------------------------------
      遮罩面板
      --------------------------------------------------------- */
@@ -57,7 +70,9 @@ class UI {
         `SEED　<b>${g.seed}</b><br>` +
         `层数　<b>第 ${g.floor} 层</b><br>` +
         `余烬　<b>${g.embers}</b><br>` +
-        `已探索　<b>${Object.keys(g.map ? g.map.visited : {}).length} / ${g.map ? g.map.cells.length : 0}</b> 间`;
+        `已探索　<b>${Object.keys(g.map ? g.map.visited : {}).length} / ${g.map ? g.map.cells.length : 0}</b> 间<br>` +
+        `持有道具　<b>${g.player ? g.player.build.length : 0}</b> 件<br>` +
+        `<span style="color:#8fa3b5">${this.buildSummary(g)}</span>`;
       this.elBtn.textContent = '继续';
       this.elHint.textContent = 'R 重新开始 · ESC 继续';
       if (this.elSeed) this.elSeed.style.display = 'none';
@@ -68,8 +83,9 @@ class UI {
       this.elText.innerHTML =
         `SEED　<b>${g.seed}</b><br>` +
         `抵达　<b>第 ${g.floor} 层 · ${g.roomTypeName()}</b><br>` +
-        `击碎残形　<b>${g.kills}</b><br>` +
-        `射出弹丸　<b>${g.player ? g.player.shotsFired : 0}</b>`;
+        `击碎残形　<b>${g.kills}</b>　射出弹丸　<b>${g.player ? g.player.shotsFired : 0}</b><br>` +
+        `持有道具　<b>${g.player ? g.player.build.length : 0}</b> 件<br>` +
+        `<span style="color:#8fa3b5">${this.buildSummary(g)}</span>`;
       this.elBtn.textContent = '重新开始';
       this.elHint.textContent = '按 R 也可以重来（可先改 Seed）';
       if (this.elSeed) this.elSeed.style.display = '';
@@ -190,6 +206,9 @@ class UI {
     /* ---- 右上：小地图 ---- */
     this.drawMinimap(ctx);
 
+    /* ---- 左下：Build 面板（持有道具 + 组合） ---- */
+    this.drawBuildPanel(ctx);
+
     /* ---- 交互提示 ---- */
     if (g.nearProp && !g.nearProp.used) {
       const txt = 'E · ' + g.nearProp.label;
@@ -235,6 +254,179 @@ class UI {
       ctx.fillStyle = vg;
       ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     }
+
+    /* 悬停说明画在最上层 */
+    this.drawItemTooltip(ctx);
+  }
+
+  /* ---------------------------------------------------------
+     Build 面板：当前持有的道具（左下角）
+     鼠标悬停任意道具 → 显示完整说明
+     --------------------------------------------------------- */
+  drawBuildPanel(ctx) {
+    const g = this.game;
+    const p = g.player;
+    if (!p || !p.build) return;
+
+    const slots = p.build.slots;
+    const mx = g.mouseWorld.x, my = g.mouseWorld.y;
+    const rowH = 18;
+    const colW = 236;
+    const maxRows = 9;
+    const maxShow = maxRows * 2;
+    const shown = Math.min(slots.length, maxShow);
+    const cols = shown > maxRows ? 2 : 1;
+    const rowsUsed = Math.min(maxRows, shown);
+    const bottomY = VIEW_H - 28;
+    const panelH = 24 + rowsUsed * rowH;
+    const px = 26, py = bottomY - panelH;
+    const panelW = colW * cols;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(6,10,15,0.72)';
+    roundRectPath(ctx, px - 8, py - 8, panelW + 16, panelH + 12, 8);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(120,190,220,0.18)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    /* 标题 */
+    ctx.font = '700 11px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#7fd7ea';
+    ctx.fillText(`BUILD · ${p.build.length} 件道具`, px, py + 4);
+
+    /* 生效中的组合 */
+    this._hoverItem = null;
+    if (p.build.comboList.length) {
+      let cx2 = px + 118;
+      ctx.font = '700 10.5px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      ctx.fillStyle = '#c08bff';
+      const names = p.build.comboList.slice(0, 3).map(c => c.name).join(' · ');
+      const more = p.build.comboList.length > 3 ? ` +${p.build.comboList.length - 3}` : '';
+      ctx.fillText('组合 ' + names + more, cx2, py + 4);
+    }
+
+    /* 道具行（列优先排布） */
+    for (let i = 0; i < shown; i++) {
+      const it = ITEM_BY_ID[slots[i].id];
+      if (!it) continue;
+      const col = i >= maxRows ? 1 : 0;
+      const row = i % maxRows;
+      const x = px + col * colW;
+      const rowY = py + 22 + row * rowH;
+
+      /* 命中矩形（供悬停判定） */
+      const inRow = mx >= x - 4 && mx <= x + colW - 12 && my >= rowY - 11 && my <= rowY + 6;
+      if (inRow) this._hoverItem = { item: it, n: slots[i].n };
+
+      /* 分类色块 */
+      const cat = ITEM_CAT[it.cat] || ITEM_CAT.special;
+      ctx.fillStyle = it.color;
+      roundRectPath(ctx, x, rowY - 9, 11, 11, 3);
+      ctx.fill();
+
+      /* 名称 + 层数 */
+      ctx.font = '700 11px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      ctx.fillStyle = inRow ? '#ffffff' : '#d6e3ee';
+      const label = it.name + (slots[i].n > 1 ? ` ×${slots[i].n}` : '');
+      ctx.fillText(label, x + 16, rowY);
+
+      /* 分类标记 */
+      ctx.font = '600 9.5px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      ctx.fillStyle = cat.color;
+      const nameW = ctx.measureText(label).width;
+      ctx.fillText(cat.cn, x + 18 + nameW + 4, rowY);
+
+      if (inRow) {
+        ctx.strokeStyle = 'rgba(255,220,150,0.55)';
+        ctx.lineWidth = 1;
+        roundRectPath(ctx, x - 4, rowY - 11, colW - 12, 17, 4);
+        ctx.stroke();
+      }
+    }
+
+    if (slots.length > maxShow) {
+      ctx.font = '600 10px "Segoe UI", system-ui, sans-serif';
+      ctx.fillStyle = '#6d8296';
+      ctx.fillText(`+${slots.length - maxShow} 件未显示`, px + colW, py + 4);
+    }
+    ctx.restore();
+  }
+
+  /* 悬停说明浮层 */
+  drawItemTooltip(ctx) {
+    const h = this._hoverItem;
+    if (!h) return;
+    const it = h.item;
+    const cat = ITEM_CAT[it.cat] || ITEM_CAT.special;
+    const combos = this.game.player.build.combosOf(it.id);
+
+    const w = 306;
+    const lines = this._wrap(ctx, it.desc, w - 30, 12);
+    const boxH = 62 + lines.length * 16 + (combos.length ? 18 + combos.length * 14 : 0);
+    let x = this.game.mouseWorld.x + 18;
+    let y = this.game.mouseWorld.y - boxH - 12;
+    if (x + w > VIEW_W - 12) x = VIEW_W - 12 - w;
+    if (y < 12) y = Math.min(VIEW_H - boxH - 12, this.game.mouseWorld.y + 20);
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(6,10,15,0.94)';
+    roundRectPath(ctx, x, y, w, boxH, 8);
+    ctx.fill();
+    ctx.strokeStyle = it.color;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    let ty = y + 22;
+
+    ctx.font = '800 14px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+    ctx.fillStyle = it.color;
+    ctx.fillText(it.name, x + 15, ty);
+
+    ctx.font = '700 11px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+    ctx.fillStyle = cat.color;
+    const nw = ctx.measureText(it.name).width;
+    ctx.fillText(cat.cn + (h.n > 1 ? ` ×${h.n}` : '') + `　上限 ${it.max}`, x + 19 + nw, ty);
+
+    ty += 20;
+    ctx.font = '600 12px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+    ctx.fillStyle = '#c8d8e4';
+    for (const ln of lines) { ctx.fillText(ln, x + 15, ty); ty += 16; }
+
+    if (combos.length) {
+      ty += 4;
+      ctx.font = '700 10.5px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      ctx.fillStyle = '#c08bff';
+      ctx.fillText('可参与的组合', x + 15, ty);
+      ty += 14;
+      ctx.font = '600 10.5px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      for (const c of combos) {
+        const active = this.game.player.build.comboList.indexOf(c) >= 0;
+        ctx.fillStyle = active ? c.color : '#5d6f7e';
+        ctx.fillText((active ? '◆ ' : '◇ ') + c.name + '　' + (active ? '已激活' : '需要 ' +
+          Object.keys(c.need).map(k => MOD_CN[k] || k).join(' + ')), x + 15, ty);
+        ty += 14;
+      }
+    }
+    ctx.restore();
+  }
+
+  /* 简单折行（兼容中文：逐字测量） */
+  _wrap(ctx, text, maxW, fontPx) {
+    ctx.font = `600 ${fontPx}px "Segoe UI", "PingFang SC", system-ui, sans-serif`;
+    const out = [];
+    let line = '';
+    for (const ch of text) {
+      const t = line + ch;
+      if (ctx.measureText(t).width > maxW && line) { out.push(line); line = ch; }
+      else line = t;
+    }
+    if (line) out.push(line);
+    return out;
   }
 
   /* ---------------------------------------------------------

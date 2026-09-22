@@ -22,11 +22,71 @@ class Projectile {
     this.rot = opt.angle;
     this.trail = [];
     this.trailMax = opt.trailMax !== undefined ? opt.trailMax : 6;
+
+    /* ---- 道具机制快照（由 Player.shoot 拷贝进来） ---- */
+    const proto = defaultMods();
+    for (const k in proto) this[k] = opt[k] || 0;
+    this.game = opt.game || null;
+    this.speed = opt.speed || 0;
+    this.damageMul = opt.damageMul || 1;
+    this.splitLeft = opt.splitLeft || 0;
+    this.isChild = !!opt.isChild;
+    this.hitIds = [];                       // 穿透时避免重复命中
+    this.rehitT = 0;                        // 回旋弹的重复命中间隔
+    this.orbitDir = opt.orbitDir !== undefined ? opt.orbitDir : (chance(0.5) ? 1 : -1);
+    this.omega = 2.2 * this.orbitDir;
+  }
+
+  /* 追踪：朝最近的敌人缓慢转向 */
+  _steer(dt) {
+    const g = this.game;
+    if (!g || !g.room) return;
+    let best = null, bestD = 520 * 520;
+    for (const e of g.room.enemies) {
+      if (e.dead) continue;
+      const d = dist2(this.x, this.y, e.x, e.y);
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    if (!best) return;
+    const cur = Math.atan2(this.vy, this.vx);
+    const want = angleTo(this.x, this.y, best.x, best.y);
+    const rate = Math.min(7.5, 2.4 + this.homing * 2.2) * dt;
+    const na = cur + clamp(angleDelta(cur, want), -rate, rate);
+    this.vx = Math.cos(na) * this.speed;
+    this.vy = Math.sin(na) * this.speed;
+  }
+
+  /* 回旋：先划弧线，后半程折返飞回玩家 */
+  _orbit(dt) {
+    const cur = Math.atan2(this.vy, this.vx);
+    let na;
+    if (this.life < this.maxLife * 0.55 && this.game && this.game.player) {
+      const p = this.game.player;
+      const want = angleTo(this.x, this.y, p.x, p.y);
+      const rate = 5.0 * dt;
+      na = cur + clamp(angleDelta(cur, want), -rate, rate);
+    } else {
+      na = cur + this.omega * dt;
+    }
+    this.vx = Math.cos(na) * this.speed;
+    this.vy = Math.sin(na) * this.speed;
   }
 
   update(dt) {
     this.trail.push(this.x, this.y);
     if (this.trail.length > this.trailMax * 2) this.trail.splice(0, 2);
+
+    if (this.homing > 0 && this.friendly) this._steer(dt);
+    if (this.orbit > 0) {
+      this._orbit(dt);
+      /* 回旋弹可以反复命中同一目标 */
+      this.rehitT -= dt;
+      if (this.rehitT <= 0) {
+        this.rehitT = this.orbitPierce > 0 ? 0.18 : 0.38;
+        this.hitIds.length = 0;
+      }
+    }
+
     this.x += this.vx * dt;
     this.y += this.vy * dt;
     this.rot += this.spin * dt;
