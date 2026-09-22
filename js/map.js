@@ -14,7 +14,8 @@ const ROOM_TYPE = {
   ELITE: 'elite',
   SHOP: 'shop',
   EVENT: 'event',
-  BOSS: 'boss'
+  BOSS: 'boss',
+  SECRET: 'secret'
 };
 
 const ROOM_META = {
@@ -24,7 +25,8 @@ const ROOM_META = {
   elite:    { cn: '精英',   color: '#ff8a5c', glyph: 'E' },
   shop:     { cn: '商栈',   color: '#7fe4ff', glyph: '$' },
   event:    { cn: '异象',   color: '#c08bff', glyph: '?' },
-  boss:     { cn: '守望者', color: '#ff4d6b', glyph: 'B' }
+  boss:     { cn: '守望者', color: '#ff4d6b', glyph: 'B' },
+  secret:   { cn: '秘室',   color: '#c08bff', glyph: '*' }
 };
 
 const DIRS = [
@@ -133,6 +135,68 @@ class GameMap {
 
     /* 7. 保险：确保 Boss 一定是离 Start 最远的房间（末端） */
     this._ensureBossTerminal();
+
+    /* 8. 隐藏房：放在保险之后，避免被剪枝逻辑误删 */
+    this._placeSecretRooms();
+  }
+
+  /* ---------------------------------------------------------
+     隐藏房
+     - 挂在一个普通房间的空邻位上（死路尽头）
+     - 未发现前：地图不显示，父房间也不开门
+     - 发现条件：击碎父房间墙上那道可疑裂缝
+     --------------------------------------------------------- */
+  _placeSecretRooms() {
+    const rng = this.rng;
+    const want = this.floor <= 1
+      ? (rng.chance(0.55) ? 1 : 0)
+      : (rng.chance(0.45) ? 2 : 1);
+
+    /* 父房间必须离 Start 足够近：秘室 = 父房间距离 +1，
+       所以要保证 秘室距离 < Boss 距离，Boss 才始终是地图尽头 */
+    const d0 = this.distancesFromStart();
+    const bd = d0[this.boss.c + ',' + this.boss.r];
+    const parents = rng.shuffle(this.cells.filter(c => {
+      if (c === this.start || c === this.boss || c.type === ROOM_TYPE.BOSS) return false;
+      if (c.c >= this.boss.c - 1) return false;        // 也要远离 Boss 所在列
+      const dd = d0[c.c + ',' + c.r];
+      return dd !== undefined && dd + 1 < bd;
+    }));
+
+    let made = 0;
+    for (const parent of parents) {
+      if (made >= want) break;
+      const sides = rng.shuffle(DIRS.slice());
+      let ok = false;
+      for (const d of sides) {
+        if (parent.links[d.side]) continue;                 // 该方向已有房间
+        const nc = parent.c + d.dc, nr = parent.r + d.dr;
+        if (nc < 0 || nc >= this.cols || nr < 0 || nr >= this.rows) continue;
+        if (this.grid[nc + ',' + nr]) continue;
+        /* 新格子除了父房间外不能有别的邻居（保持死路尽头） */
+        let extra = 0;
+        for (const dd of DIRS) {
+          const nb = this.grid[(nc + dd.dc) + ',' + (nr + dd.dr)];
+          if (nb && nb !== parent) extra++;
+        }
+        if (extra > 0) continue;
+
+        const cell = this._add(nc, nr);
+        cell.type = ROOM_TYPE.SECRET;
+        cell.hidden = true;
+        cell.discovered = false;
+        cell.branch = true;
+        /* 记录裂缝开在哪一侧（父房间视角） */
+        parent.secretSide = d.side;
+        parent.secretCell = cell;
+        cell.parentCell = parent;
+        this._linkAll();
+        ok = true;
+        made++;
+        break;
+      }
+      if (!ok) continue;
+    }
   }
 
   /* BFS 距离表（以 Start 为原点） */
@@ -250,13 +314,43 @@ class GameMap {
   /* ---------------------------------------------------------
      查询
      --------------------------------------------------------- */
+  /* 门的连接：未发现的隐藏房不出现在父房间的门列表里 */
   connectionsOf(cell) {
-    return {
+    const out = {
       top: !!cell.links.top,
       bottom: !!cell.links.bottom,
       left: !!cell.links.left,
       right: !!cell.links.right
     };
+    for (const d of DIRS) {
+      const n = cell.links[d.side];
+      if (n && n.hidden && !n.discovered) out[d.side] = false;
+    }
+    return out;
+  }
+
+  /* 揭示整张地图（回廊残图） */
+  revealAll() {
+    for (const c of this.cells) {
+      if (c.hidden && !c.discovered) continue;
+      this.visit(c);
+    }
+  }
+
+  secretCells() { return this.cells.filter(c => c.hidden); }
+
+  /* 计入探索度的房间数（未发现的隐藏房不算在内） */
+  countableRooms() {
+    return this.cells.filter(c => !c.hidden || c.discovered).length;
+  }
+
+  countableVisited() {
+    let n = 0;
+    for (const c of this.cells) {
+      if (c.hidden && !c.discovered) continue;
+      if (this.isVisited(c)) n++;
+    }
+    return n;
   }
 
   neighbor(cell, side) { return cell.links[side] || null; }

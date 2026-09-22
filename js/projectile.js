@@ -37,19 +37,28 @@ class Projectile {
     this.omega = 2.2 * this.orbitDir;
   }
 
-  /* 追踪：朝最近的敌人缓慢转向 */
+  /* 追踪：友军弹朝最近的敌人转向，敌方弹朝玩家缓慢转向（转向速率受限，可躲） */
   _steer(dt) {
     const g = this.game;
-    if (!g || !g.room) return;
-    let best = null, bestD = 520 * 520;
-    for (const e of g.room.enemies) {
-      if (e.dead) continue;
-      const d = dist2(this.x, this.y, e.x, e.y);
-      if (d < bestD) { bestD = d; best = e; }
+    if (!g) return;
+    let tx, ty;
+    if (this.friendly) {
+      let best = null, bestD = 520 * 520;
+      const list = g.room ? g.room.enemies : [];
+      for (const e of list) {
+        if (e.dead) continue;
+        const d = dist2(this.x, this.y, e.x, e.y);
+        if (d < bestD) { bestD = d; best = e; }
+      }
+      if (!best) return;
+      tx = best.x; ty = best.y;
+    } else {
+      const p = g.player;
+      if (!p || p.dead) return;
+      tx = p.x; ty = p.y;
     }
-    if (!best) return;
     const cur = Math.atan2(this.vy, this.vx);
-    const want = angleTo(this.x, this.y, best.x, best.y);
+    const want = angleTo(this.x, this.y, tx, ty);
     const rate = Math.min(7.5, 2.4 + this.homing * 2.2) * dt;
     const na = cur + clamp(angleDelta(cur, want), -rate, rate);
     this.vx = Math.cos(na) * this.speed;
@@ -76,7 +85,7 @@ class Projectile {
     this.trail.push(this.x, this.y);
     if (this.trail.length > this.trailMax * 2) this.trail.splice(0, 2);
 
-    if (this.homing > 0 && this.friendly) this._steer(dt);
+    if (this.homing > 0) this._steer(dt);
     if (this.orbit > 0) {
       this._orbit(dt);
       /* 回旋弹可以反复命中同一目标 */

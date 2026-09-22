@@ -37,12 +37,19 @@ class Room {
     this.spawnFx = 0;
     this.everCleared = false;
     this._spawnCounter = 0;
+    this.crack = null;               // 隐藏房裂缝（父房间才有）
 
     this._buildWalls();
     this._buildFloor();
     this._planWaves();
     this._spawnProps();
     this._startWave();
+  }
+
+  /* 隐藏房被发现后：父房间需要重新开门 */
+  refreshConnections(conns) {
+    this.connections = conns;
+    this._buildWalls();
   }
 
   get meta() { return ROOM_META[this.type] || ROOM_META.combat; }
@@ -205,44 +212,25 @@ class Room {
   _planWaves() {
     const rng = this.rng;
     this.waves = [];
+    this.themeCn = '';
 
     if (!this.isCombatRoom) return;
 
     if (this.type === ROOM_TYPE.BOSS) {
       this.waves = [['boss']];
+      this.themeCn = '守望者';
       return;
     }
 
-    const depth = this.depth;
-    const elite = this.type === ROOM_TYPE.ELITE;
-    const total = elite
-      ? Math.min(7, 3 + Math.floor(depth * 0.9))
-      : Math.min(10, 3 + Math.floor(depth * 1.1));
-
-    const pool = [['chaser', 5]];
-    pool.push(['shooter', depth >= 1 ? 3 : 2]);
-    pool.push(['charger', depth >= 2 ? 3 : 2]);
-    if (elite) pool.push(['charger', 3], ['shooter', 2]);
-
-    const list = [];
-    for (let i = 0; i < total; i++) {
-      let sum = 0;
-      for (const p of pool) sum += p[1];
-      let r = rng.next() * sum;
-      let chosen = 'chaser';
-      for (const p of pool) {
-        r -= p[1];
-        if (r <= 0) { chosen = p[0]; break; }
-      }
-      list.push(chosen);
-    }
-    if (!list.includes('chaser')) list[0] = 'chaser';
-
-    if (total <= 5 || elite) this.waves = [list];
-    else {
-      const cut = Math.ceil(total * 0.55);
-      this.waves = [list.slice(0, cut), list.slice(cut)];
-    }
+    /* 编队生成：按房间类型 + 深度组合敌人，而不是把所有种类随机混在一起 */
+    const res = SpawnDirector.build({
+      type: this.type,
+      depth: this.depth,
+      isElite: this.type === ROOM_TYPE.ELITE,
+      rng: rng.fork('waves')
+    });
+    this.waves = res.waves;
+    this.themeCn = res.theme || '';
   }
 
   _startWave() {
@@ -256,6 +244,16 @@ class Room {
   _spawnProps() {
     const cx = VIEW_W / 2, cy = VIEW_H / 2;
     const rng = this.rng;
+
+    /* 隐藏房裂缝：父房间墙上（只有未发现时才存在） */
+    const secSide = this.def.secretSide;
+    const secCell = this.def.secretCell;
+    if (secSide && secCell && !secCell.discovered) {
+      const pos = this._wallCenter(secSide);
+      this.crack = new WallCrack(this.game, pos.x, pos.y, secSide, secCell);
+      this.props.push(this.crack);
+    }
+
     switch (this.type) {
       case ROOM_TYPE.TREASURE:
         /* 主宝箱居中；第 2 层起两侧各多一口小箱 */
@@ -266,15 +264,39 @@ class Room {
         }
         break;
       case ROOM_TYPE.EVENT:
-        this.props.push(new Shrine(this.game, cx, cy, rng.fork('shrine')));
+        this.props.push(new EventShrine(this.game, cx, cy, rng.fork('event')));
         break;
-      case ROOM_TYPE.SHOP:
-        this.props.push(new Pedestal(this.game, cx - 110, cy, rng.fork('shop0'), 10));
-        this.props.push(new Pedestal(this.game, cx + 110, cy, rng.fork('shop1'), 16));
+      case ROOM_TYPE.SHOP: {
+        /* 3~5 个货架，横向铺开 */
+        const stocks = rollShopStocks(rng.fork('shop'), this.game, this.depth + 1);
+        const n = stocks.length;
+        const span = Math.min(190, 760 / Math.max(1, n));
+        for (let i = 0; i < n; i++) {
+          const x = cx + (i - (n - 1) / 2) * span;
+          this.props.push(new ShopStall(this.game, x, cy + 30, stocks[i]));
+        }
         break;
+      }
+      case ROOM_TYPE.SECRET: {
+        /* 秘室：两口宝箱 + 一堆金币 */
+        this.props.push(new Chest(this.game, cx - 150, cy - 10, rng.fork('secL'), false));
+        this.props.push(new Chest(this.game, cx + 150, cy - 10, rng.fork('secR'), true));
+        const pile = new CoinPile(this.game, cx, cy + 90, 45 + (this.depth + 1) * 18);
+        this.props.push(pile);
+        break;
+      }
       default:
         break;
     }
+  }
+
+  /* 墙面中心点（裂缝用） */
+  _wallCenter(side) {
+    const cx = VIEW_W / 2, cy = VIEW_H / 2;
+    if (side === 'top') return { x: cx, y: WALL_T * 0.5 };
+    if (side === 'bottom') return { x: cx, y: VIEW_H - WALL_T * 0.5 };
+    if (side === 'left') return { x: WALL_T * 0.5, y: cy };
+    return { x: VIEW_W - WALL_T * 0.5, y: cy };
   }
 
   /* ---------------------------------------------------------
@@ -302,13 +324,27 @@ class Room {
   }
 
   _spawnEnemy(type) {
-    const r = type === 'boss' ? 34 : (type === 'charger' ? 19 : (type === 'shooter' ? 18 : 16));
+    /* 半径走注册表（新增敌人不用改这里） */
+    const r = EnemyFactory.radiusOf(type);
     const pt = type === 'boss'
       ? { x: ARENA.x + ARENA.w / 2, y: ARENA.y + 120 }
       : this._spawnPoint(r);
     /* 每只敌人派生独立 Rng → 敌人组成、出生点、行为都随种子复现 */
     const e = EnemyFactory.create(this.game, type, pt.x, pt.y, this.tier,
       this.rng.fork('enemy' + this._spawnCounter++));
+
+    /* 精英房：每只敌人带 1~2 个词缀（更硬 / 更疯 / 死亡特效） */
+    if (this.type === ROOM_TYPE.ELITE) {
+      const keys = Object.keys(ELITE_AFFIX);
+      const cnt = this.depth >= 2 ? 2 : 1;
+      const pick = [];
+      for (let i = 0; i < cnt; i++) {
+        const k = keys[Math.floor(this.rng.next() * keys.length)];
+        if (pick.indexOf(k) < 0) pick.push(k);
+      }
+      e.applyAffixes(pick);
+    }
+
     this.enemies.push(e);
     this.spawnFx = 0.3;
     this.game.particles.ring(pt.x, pt.y, e.colors[1], type === 'boss' ? 26 : 12, type === 'boss' ? 260 : 150);
@@ -391,12 +427,16 @@ class Room {
     this.clearTime = 0;
     this.everCleared = true;
 
-    /* Boss 房通关 → 生成层间裂隙；精英房通关 → 掉落宝箱 */
+    /* Boss 房通关 → 生成层间裂隙；精英房通关 → 掉落宝箱 + 金币堆 */
     if (this.type === ROOM_TYPE.BOSS) {
       this.props.push(new Portal(this.game, ARENA.x + ARENA.w / 2, ARENA.y + ARENA.h / 2));
+      this.props.push(new CoinPile(this.game, ARENA.x + ARENA.w / 2 + 130, ARENA.y + ARENA.h / 2,
+        60 + this.depth * 25));
     } else if (this.type === ROOM_TYPE.ELITE) {
-      this.props.push(new Chest(this.game, ARENA.x + ARENA.w / 2, ARENA.y + ARENA.h / 2,
+      this.props.push(new Chest(this.game, ARENA.x + ARENA.w / 2 - 60, ARENA.y + ARENA.h / 2,
         this.rng.fork('eliteChest'), false));
+      this.props.push(new CoinPile(this.game, ARENA.x + ARENA.w / 2 + 90, ARENA.y + ARENA.h / 2,
+        28 + this.depth * 12));
     }
     this.game.onRoomCleared(this);
   }

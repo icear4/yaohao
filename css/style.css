@@ -72,8 +72,8 @@ body.touch-mode #fs-btn { display: none; }
   pointer-events: none;
 }
 
-/* ---------- 全屏按钮（右下角，避开右上小地图） ---------- */
-#fs-btn {
+/* ---------- HUD 角落按钮（右下角，避开右上小地图） ---------- */
+#fs-btn, #shake-btn {
   position: absolute;
   bottom: 14px;
   right: 16px;
@@ -88,11 +88,15 @@ body.touch-mode #fs-btn { display: none; }
   cursor: pointer;
   transition: background .18s, color .18s, border-color .18s;
 }
-#fs-btn:hover {
+#fs-btn:hover, #shake-btn:hover {
   background: rgba(20, 48, 60, 0.92);
   color: #d8fbff;
   border-color: rgba(120, 230, 255, 0.7);
 }
+
+/* 抖动按钮排在全屏按钮左侧；触屏模式下全屏按钮隐藏，它补位 */
+#shake-btn { right: 96px; }
+body.touch-mode #shake-btn { right: 16px; }
 
 /* ---------- 遮罩面板 ---------- */
 .overlay {

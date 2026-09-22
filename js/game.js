@@ -10,6 +10,18 @@ class Game {
     this.ctx = canvas.getContext('2d');
     this.dpr = 1;
 
+    /* 屏幕抖动强度档位（可在 HUD 按钮上循环切换，写入 localStorage 记住）
+       必须在 new UI 之前初始化：UI 构造时会读它来渲染按钮文案 */
+    this.shakeLevels = [
+      { name: '关', scale: 0 },
+      { name: '弱', scale: 0.3 },
+      { name: '中', scale: 0.6 },
+      { name: '强', scale: 1 }
+    ];
+    this.shakeLevel = 1;               // 默认「弱」
+    this.shakeScale = this.shakeLevels[1].scale;
+    this._loadShakePref();
+
     this.input = new Input(canvas);
     this.ui = new UI(this);
     this.particles = new ParticleSystem(900);
@@ -210,9 +222,65 @@ class Game {
 
   roomTypeName() { return this.room ? this.room.meta.cn : '-'; }
 
+  /* ---------------------------------------------------------
+     金币（coins）—— 与旧字段 embers 完全等价，只是换成更直白的名字
+     --------------------------------------------------------- */
+  get coins() { return this.embers; }
+  set coins(v) { this.embers = v; }
+
+  addCoins(n, x, y) {
+    n = Math.round(n);
+    if (n <= 0) return 0;
+    this.embers += n;
+    if (x !== undefined) {
+      this.damageNumbers.add(x, y - 14, '◈' + n, { color: '#ffd35e', life: 0.9, vy: -46 });
+    }
+    return n;
+  }
+
+  spendCoins(n) {
+    if (this.embers < n) return false;
+    this.embers -= n;
+    return true;
+  }
+
+  /* ---------------------------------------------------------
+     隐藏房
+     --------------------------------------------------------- */
+  discoverSecret(cell) {
+    if (!cell || cell.discovered) return false;
+    cell.discovered = true;
+
+    /* 父房间的实例（可能已缓存）需要重新开门 */
+    const parent = cell.parentCell;
+    if (parent) {
+      const key = this.floor + '#' + parent.c + ',' + parent.r;
+      const room = this.roomCache[key];
+      if (room) {
+        room.refreshConnections(this.map.connectionsOf(parent));
+        /* 裂缝已经碎了，从物件里去掉 */
+        room.props = room.props.filter(pr => !(pr instanceof WallCrack));
+        room.crack = null;
+      }
+    }
+    this.ui.showBanner('秘室显现', '墙上裂开一道通往未知房间的缺口', 2.6);
+    this.addShake(4);
+    return true;
+  }
+
+  /* 揭示本层全部隐藏房（返回数量） */
+  discoverAllSecrets(alsoVisit) {
+    const list = this.map.secretCells().filter(c => !c.discovered);
+    for (const c of list) {
+      this.discoverSecret(c);
+      if (alsoVisit) this.map.visit(c);
+    }
+    return list.length;
+  }
+
   onPlayerDeath() {
     this.state = 'gameover';
-    this.addShake(16);
+    this.addShake(9);
     this.particles.burst(this.player.x, this.player.y, 34, {
       speed: 260, life: 0.9, size: 5, colors: ['#ffb347', '#ff6b5c', '#ffffff', '#7fd7ea']
     });
@@ -221,13 +289,30 @@ class Game {
 
   onEnemyKilled(e) {
     this.kills++;
-    let drop = 2;
-    if (e.type === 'charger') drop = 3;
-    else if (e.type === 'shooter') drop = 2;
-    if (e.type === 'boss') drop = 40;
-    if (e.isBoss) drop = 40;
+
+    /* 金币掉落：基础值 + 层数加成；精英房整体更高；「富饶」词缀 ×3 */
+    let drop = 3 + Math.floor(this.floor * 0.8);
+    if (e.type === 'charger') drop += 3;
+    else if (e.type === 'shooter') drop += 1;
+    /* 种类定义的额外金币（注册表里 coin 字段） */
+    if (e.coinBonus) drop += e.coinBonus;
+    if (e.isBoss) drop = 90 + this.floor * 20;
+    if (this.room && this.room.type === ROOM_TYPE.ELITE) drop = Math.round(drop * 1.5);
+    if (e.affix && e.affix.indexOf('rich') >= 0) drop *= 3;
     this.embers += drop;
     this.damageNumbers.add(e.x, e.y - 14, '◈' + drop, { color: '#ffd35e', life: 0.9, vy: -46 });
+
+    /* 精英词缀结算 */
+    if (e.affix) {
+      if (e.affix.indexOf('volatile') >= 0) {
+        this._explode(e.x, e.y, 92, 22 + this.floor * 3, { color: '#ff4d6b' });
+      }
+      if (e.affix.indexOf('splitting') >= 0 && this.room) {
+        for (let i = 0; i < 2; i++) {
+          this.room.pending.push({ type: 'chaser', delay: 0.12 * i });
+        }
+      }
+    }
 
     /* 击杀类组合 */
     const m = (this.player && this.player.mods) ? this.player.mods : {};
@@ -243,7 +328,7 @@ class Game {
     if (room.type === ROOM_TYPE.BOSS) {
       this.ui.showClearBanner('守望者已陨落 · 触碰裂隙进入下一层');
       this.player.heal(35);
-      this.addShake(10);
+      this.addShake(6);
     } else if (room.isCombatRoom) {
       this.ui.showClearBanner();
       this.player.heal(room.type === ROOM_TYPE.ELITE ? 18 : 10);
@@ -340,19 +425,28 @@ class Game {
       } else if (this.room.isCombatRoom && this.room.state !== 'clear') {
         sub = '返回之前的房间 · 战斗继续';
       } else if (cell.type === ROOM_TYPE.TREASURE || cell.type === ROOM_TYPE.SHOP ||
-                 cell.type === ROOM_TYPE.EVENT) {
+                 cell.type === ROOM_TYPE.EVENT || cell.type === ROOM_TYPE.SECRET) {
         sub = '已探索 · 开启过的物件保持原样';
       } else {
         sub = '已探索 · 房间保持清空状态';
       }
     } else if (cell.type === ROOM_TYPE.BOSS) sub = '守望者就在前方';
+    else if (cell.type === ROOM_TYPE.SECRET) sub = '秘室 · 无人看守的丰厚奖励';
     else if (cell.type === ROOM_TYPE.TREASURE) sub = '按 E 开启宝箱';
     else if (cell.type === ROOM_TYPE.SHOP) sub = '按 E 购买强化';
     else if (cell.type === ROOM_TYPE.EVENT) sub = '按 E 触碰异象';
-    else if (cell.type === ROOM_TYPE.ELITE) sub = '强力残形盘踞';
+    else if (cell.type === ROOM_TYPE.ELITE) sub = '强力残形盘踞 · ' + this._roomTheme();
     else if (cell.type === ROOM_TYPE.START) sub = '走进门洞开始探索';
-    else sub = '击败所有残形，门才会开启';
+    else sub = this._roomTheme() + '编队 · 击败所有残形，门才会开启';
     this.ui.showBanner(meta.cn, sub, alreadyVisited ? 1.2 : 1.5);
+  }
+
+  /* 当前房间的编队主题（供横幅显示） */
+  _roomTheme() {
+    if (!this.room) return '';
+    if (this.room.themeCn) return this.room.themeCn;
+    const n = this.room.aliveCount();
+    return n > 0 ? '残形 ×' + n : '';
   }
 
   /* 走进门洞 → 摄像机滑向相邻房间 */
@@ -374,6 +468,12 @@ class Game {
      投射物
      --------------------------------------------------------- */
   spawnProjectile(opt) {
+    /* 弹幕安全上限：敌方在场弹数封顶，杜绝「无法躲避的弹幕墙」 */
+    if (!opt.friendly && !opt.isChild) {
+      let hostile = 0;
+      for (const p of this.projectiles) if (!p.friendly && !p.isChild) hostile++;
+      if (hostile >= 110) return null;
+    }
     const p = new Projectile(opt);
     this.projectiles.push(p);
     return p;
@@ -435,7 +535,7 @@ class Game {
     this.particles.burst(x, y, 16, {
       speed: 260, life: 0.55, size: 5, colors: [color, '#ffffff', '#ffd35e']
     });
-    this.addShake(2.6);
+    this.addShake(1.4);
 
     const mul = opt.dmgMul === undefined ? 0.6 : opt.dmgMul;
     const amount = Math.max(1, Math.round(dmg * mul));
@@ -627,6 +727,18 @@ class Game {
         continue;
       }
 
+      /* 可疑裂缝：只能被子弹打碎（发现隐藏房的唯一途径） */
+      if (p.friendly && !p.crackHit && room.crack && room.crack.hitTest(p.x, p.y, p.r)) {
+        room.crack.onHit(p);
+        if (!(p.pierce > 0 || p.orbit > 0)) {
+          this.particles.burst(p.x, p.y, 6, {
+            speed: 150, life: 0.3, size: 3, color: p.color, drag: 6
+          });
+          this.projectiles.splice(i, 1);
+          continue;
+        }
+      }
+
       /* 撞墙：反弹或消散 */
       if (room.hitsWall(p.x, p.y, p.r)) {
         const boomerang = p.orbit > 0;      // 回旋弹永远不会被墙吃掉
@@ -672,7 +784,6 @@ class Game {
             color: crit ? '#ffd85e' : '#ffcf8a',
             dir: Math.atan2(p.vy, p.vx) + Math.PI, spread: 1.7
           });
-          if (crit) this.addShake(2.4);
 
           /* 穿透 / 回旋：继续飞行 */
           if (p.pierce > 0 || p.orbit > 0) {
@@ -705,8 +816,48 @@ class Game {
     }
   }
 
+  /* ---------------------------------------------------------
+     屏幕抖动：全局倍率 + 取大不叠加（避免多个来源叠加成剧烈晃动）
+     --------------------------------------------------------- */
   addShake(v) {
-    this.shake = Math.min(22, this.shake + v);
+    if (this.shakeScale <= 0) return;
+    const add = v * this.shakeScale;
+    if (add <= 0.05) return;
+    this.shake = Math.min(13, Math.max(this.shake, add));
+  }
+
+  cycleShake() {
+    this.shakeLevel = (this.shakeLevel + 1) % this.shakeLevels.length;
+    this.shakeScale = this.shakeLevels[this.shakeLevel].scale;
+    this._saveShakePref();
+    if (this.ui && this.ui.refreshShakeBtn) this.ui.refreshShakeBtn();
+    if (this.ui && this.ui.showBanner) {
+      this.ui.showBanner('屏幕抖动 · ' + this.shakeLevels[this.shakeLevel].name, '', 1.1);
+    }
+    return this.shakeLevels[this.shakeLevel].name;
+  }
+
+  shakeLabel() {
+    return this.shakeLevels[this.shakeLevel].name;
+  }
+
+  _loadShakePref() {
+    try {
+      const v = (typeof localStorage !== 'undefined') ? localStorage.getItem('echoRiftShake') : null;
+      if (v !== null && v !== undefined) {
+        const n = parseInt(v, 10);
+        if (n >= 0 && n < this.shakeLevels.length) {
+          this.shakeLevel = n;
+          this.shakeScale = this.shakeLevels[n].scale;
+        }
+      }
+    } catch (e) { /* localStorage 不可用（隐私模式 / 无头环境）就用默认值 */ }
+  }
+
+  _saveShakePref() {
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.setItem('echoRiftShake', String(this.shakeLevel));
+    } catch (e) { /* 忽略 */ }
   }
 
   /* ---------------------------------------------------------
@@ -745,7 +896,7 @@ class Game {
       }
       this.particles.update(dt);
       this.damageNumbers.update(dt);
-      this.shake = Math.max(0, this.shake - dt * 45);
+      this.shake = Math.max(0, this.shake - dt * 62);
       this.input.endFrame();
       return;
     }
@@ -770,7 +921,7 @@ class Game {
     this._updateFx(dt);
     this.particles.update(dt);
     this.damageNumbers.update(dt);
-    this.shake = Math.max(0, this.shake - dt * 45);
+    this.shake = Math.max(0, this.shake - dt * 62);
 
     /* 交互物件 */
     this.nearProp = null;

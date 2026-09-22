@@ -77,7 +77,6 @@ class Chest extends Prop {
     const p = this.game.player;
     const got = p.gainItem(this.item.id);
     if (!got) return false;                 // 已达堆叠上限
-    this.game.addShake(3);
     this.game.ui.showBanner(got.name, got.desc, 2.6);
     this.game.damageNumbers.add(this.x, this.y - 30, this.item.name, {
       color: this.item.color, life: 1.3, vy: -40
@@ -182,7 +181,6 @@ class Shrine extends Prop {
     this.game.ui.showBanner(o.name, o.desc, 2.2);
     this.game.damageNumbers.add(this.x, this.y - 32, o.name, { color: o.color, life: 1.3, vy: -40 });
     this.game.particles.ring(this.x, this.y, o.color, 20, 200);
-    this.game.addShake(3);
     return true;
   }
 

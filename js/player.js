@@ -45,6 +45,9 @@ class Player {
     this.build = new Build(this);
     this.mods = this.build.mods;
 
+    /* ---- 临时增益 / 诅咒 ---- */
+    this.buffs = new BuffSystem(this);
+
     /* ---- 运行时状态 ---- */
     this.fireTimer = 0;
     this.invuln = 0;
@@ -57,7 +60,16 @@ class Player {
     this.dead = false;
     this.shotsFired = 0;
     this.trailT = 0;      // 烬迹计时
+    this.slowT = 0;       // 被泥沼等减速的剩余时间
   }
+
+  /* 被减速（取最长持续时间，不叠加） */
+  applySlow(dur) {
+    if (this.dead) return;
+    this.slowT = Math.max(this.slowT, dur);
+  }
+
+  get slowFactor() { return this.slowT > 0 ? 0.55 : 1; }
 
   /* 拾取道具（所有入口统一走这里） */
   gainItem(itemId) {
@@ -75,6 +87,18 @@ class Player {
   update(dt, input) {
     if (this.dead) return;
 
+    /* 减速计时 */
+    if (this.slowT > 0) {
+      this.slowT -= dt;
+      if (Math.random() < dt * 8) {
+        this.game.particles.spawn(
+          this.x + rand(-10, 10), this.y + rand(-6, 10),
+          rand(-8, 8), rand(-24, -6), rand(0.3, 0.6), rand(2, 4),
+          'rgba(120,180,255,0.5)', { drag: 3 }
+        );
+      }
+    }
+
     /* 移动（键盘 WASD/方向键 与 触屏虚拟摇杆统一走 Input.moveVector） */
     const v = input.moveVector();
     let mx = v.x, my = v.y;
@@ -83,7 +107,7 @@ class Player {
     this.moving = vlen > 0.001;
     if (this.moving) {
       if (vlen > 1) { mx /= vlen; my /= vlen; }
-      const sp = this.moveSpeed;
+      const sp = this.moveSpeed * this.slowFactor;
       this.x += mx * sp * dt;
       this.y += my * sp * dt;
       this.walkPhase += dt * 11;
@@ -100,6 +124,9 @@ class Player {
     /* 瞄准 */
     const m = this.game.mouseWorld;
     this.aim = angleTo(this.x, this.y, m.x, m.y);
+
+    /* 临时增益 / 诅咒计时 */
+    this.buffs.update(dt);
 
     /* 生命回复 */
     if (this.regen > 0 && this.hp > 0 && this.hp < this.maxHp) {
@@ -188,7 +215,6 @@ class Player {
       this.y + Math.sin(this.aim) * (this.r + 10),
       this.aim, '#ffd27a'
     );
-    this.game.addShake(1.1);
   }
 
   /* ---------------------------------------------------------
@@ -201,7 +227,7 @@ class Player {
     this.hp -= real;
     this.invuln = this.invulnTime;
     this.hurtFlash = 1;
-    this.game.addShake(7);
+    this.game.addShake(4.5);
 
     const ang = angleTo(srcX, srcY, this.x, this.y);
     this.game.particles.burst(this.x, this.y, 12, {

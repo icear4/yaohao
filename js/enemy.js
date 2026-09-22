@@ -7,6 +7,18 @@
 'use strict';
 
 /* -----------------------------------------------------------
+   精英词缀表（数据驱动：新增词缀只需加一条数据）
+   ----------------------------------------------------------- */
+const ELITE_AFFIX = {
+  warded:    { cn: '守护', color: '#7fe4ff', desc: '生命 +60%' },
+  armored:   { cn: '甲壳', color: '#c8d8e4', desc: '受到伤害 -30%' },
+  frenzy:    { cn: '狂乱', color: '#ff8a5c', desc: '移速 +40%，接触伤害 +20%' },
+  volatile:  { cn: '不稳', color: '#ff4d6b', desc: '死亡时爆裂' },
+  splitting: { cn: '裂生', color: '#9ad14f', desc: '死亡时裂出两只残形' },
+  rich:      { cn: '富饶', color: '#ffd35e', desc: '掉落金币 ×3' }
+};
+
+/* -----------------------------------------------------------
    敌人基类
    ----------------------------------------------------------- */
 class Enemy {
@@ -49,7 +61,22 @@ class Enemy {
     this.slowT = 0; this.slowStack = 0;
     this.baseSpeed = this.speed;
     this.dotAcc = 0;
+
+    /* ---- 精英词缀 ---- */
+    this.dr = 0;                     // 伤害减免（甲壳词缀）
+    this.affix = null;               // 词缀 key 列表
+
+    /* ---- 护盾 / 增益（由特殊敌人提供） ---- */
+    this.shield = 0;                 // 护盾值：先于生命被消耗
+    this.rageT = 0;                  // 狂暴增益剩余时间（移速 +25%，伤害 ×1.2）
+
+    /* ---- 需要随层数成长的自定义伤害字段（子类填名字） ---- */
+    this.dmgFields = null;
+    this.coinBonus = 0;              // 额外金币（由种类定义写入）
   }
+
+  /* 精英词缀表（数据驱动） */
+  static get AFFIX() { return ELITE_AFFIX; }
 
   /* 施加状态：kind = burn | poison | freeze | slow，level = 层数 */
   applyStatus(kind, level) {
@@ -80,6 +107,7 @@ class Enemy {
     if (this.poisonT > 0) this.poisonT -= dt; else this.poisonStack = 0;
     if (this.freezeT > 0) this.freezeT -= dt;
     if (this.slowT > 0) this.slowT -= dt; else this.slowStack = 0;
+    if (this.rageT > 0) this.rageT -= dt;
 
     const dps = this.burnStack * 3.2 + this.poisonStack * 2.4;
     if (dps > 0) {
@@ -98,9 +126,10 @@ class Enemy {
       }
     }
 
-    /* 速度倍率：冰冻结死，减速按比例 */
+    /* 速度倍率：冰冻结死，减速按比例，狂暴加速 */
     const slowMul = this.slowT > 0 ? Math.max(0.4, 1 - 0.15 * this.slowStack) : 1;
-    this.speed = this.baseSpeed * (this.freezeT > 0 ? 0 : slowMul);
+    const rageMul = this.rageT > 0 ? 1.25 : 1;
+    this.speed = this.baseSpeed * (this.freezeT > 0 ? 0 : slowMul) * rageMul;
 
     /* 极寒领域：被冻结/减速的敌人向外散发寒气 */
     if (this.game.player && this.game.player.mods &&
@@ -126,6 +155,51 @@ class Enemy {
     this.speed *= spdMul;
     this.baseSpeed = this.speed;
     this.tier = tier;
+
+    /* 子类声明的自定义伤害字段（子弹伤害 / 砸地伤害等）同步成长 */
+    if (this.dmgFields) {
+      for (const k of this.dmgFields) {
+        if (typeof this[k] === 'number') this[k] = Math.round(this[k] * dmgMul);
+      }
+    }
+  }
+
+  /* 伤害输出（受狂暴增益影响） */
+  dmgOut(base) { return Math.round(base * (this.rageT > 0 ? 1.2 : 1)); }
+
+  /* 统一的敌方弹幕生成入口：所有敌人子弹都从这里出，便于统一做安全限制 */
+  fireBullet(angle, opt) {
+    opt = opt || {};
+    return this.game.spawnProjectile({
+      x: this.x + Math.cos(angle) * (this.r + (opt.offset || 6)),
+      y: this.y + Math.sin(angle) * (this.r + (opt.offset || 6)),
+      angle: angle,
+      speed: opt.speed || 300,
+      damage: opt.damage === undefined ? 8 : opt.damage,
+      r: opt.r || 6,
+      friendly: false,
+      color: opt.color || this.colors[1],
+      core: opt.core || '#ffffff',
+      life: opt.life || 3.0,
+      spin: opt.spin || 0,
+      homing: opt.homing || 0,
+      game: this.game
+    });
+  }
+
+  /* 精英词缀（数据驱动，只改数值与标记，不动子类 AI） */
+  applyAffixes(keys) {
+    if (!keys || !keys.length) return;
+    this.affix = keys.slice();
+    for (const k of keys) {
+      if (k === 'warded') { this.maxHp = Math.round(this.maxHp * 1.6); this.hp = this.maxHp; }
+      else if (k === 'armored') { this.dr = 0.30; this.r = Math.round(this.r * 1.18); }
+      else if (k === 'frenzy') {
+        this.speed *= 1.4; this.baseSpeed = this.speed;
+        this.touchDamage = Math.round(this.touchDamage * 1.2);
+      }
+      /* volatile / splitting / rich 只做标记，结算在 Game.onEnemyKilled */
+    }
   }
 
   update(dt) {
@@ -179,7 +253,7 @@ class Enemy {
     if (!p || p.dead) return false;
     const reach = this.r + p.r + (extraRange || 2);
     if (dist2(this.x, this.y, p.x, p.y) <= reach * reach) {
-      const hurt = p.takeDamage(amount, this.x, this.y);
+      const hurt = p.takeDamage(this.dmgOut(amount), this.x, this.y);
       this.touchTimer = this.touchInterval;
       /* 烬刺外皮：近身接触时反弹伤害 */
       const th = (p.mods && p.mods.thorns) || 0;
@@ -196,6 +270,27 @@ class Enemy {
 
   takeDamage(amount, srcX, srcY) {
     if (this.dead) return;
+    if (this.dr > 0) amount = amount * (1 - this.dr);   // 甲壳词缀：减伤
+    if (amount < 1) amount = 1;
+
+    /* 护盾：先扣盾，扣完才算伤害（仍然有受击反馈） */
+    if (this.shield > 0) {
+      const absorb = Math.min(this.shield, amount);
+      this.shield -= absorb;
+      amount -= absorb;
+      this.hitFlash = 1;
+      this.game.particles.hitSpark(
+        lerp(srcX, this.x, 0.75), lerp(srcY, this.y, 0.75),
+        angleTo(srcX, srcY, this.x, this.y) + Math.PI, '#8fd8ff'
+      );
+      if (amount < 1) {
+        this.game.damageNumbers.add(this.x, this.y - this.r - 6, '盾', {
+          color: '#8fd8ff', life: 0.55
+        });
+        return;
+      }
+    }
+
     this.hp -= amount;
     this.hitFlash = 1;
 
@@ -223,7 +318,6 @@ class Enemy {
       speed: 120, life: 0.6, size: 5, color: '#ffffff',
       colors: ['#ffffff', this.colors[1], this.colors[0]], drag: 2.2
     });
-    this.game.addShake(3.2);
     this.game.onEnemyKilled(this);
   }
 
@@ -254,6 +348,37 @@ class Enemy {
     ctx.globalAlpha = st < 1 ? 0.35 + 0.65 * st : 1;
 
     this.onDraw(ctx);
+
+    /* 精英词缀光环 */
+    if (this.affix && this.affix.length) {
+      const col = ELITE_AFFIX[this.affix[0]] ? ELITE_AFFIX[this.affix[0]].color : '#ff8a5c';
+      ctx.save();
+      ctx.strokeStyle = col;
+      ctx.globalAlpha = 0.55 + 0.2 * Math.sin(this.animT * 3);
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.lineDashOffset = -this.animT * 14;
+      ctx.beginPath();
+      ctx.arc(0, 0, this.r + 7, 0, TAU);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    /* 护盾环（盾持者提供） */
+    if (this.shield > 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.42 + 0.2 * Math.sin(this.animT * 5);
+      ctx.strokeStyle = '#8fd8ff';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.arc(0, 0, this.r + 4.5, 0, TAU);
+      ctx.stroke();
+      ctx.globalAlpha = 0.16;
+      ctx.fillStyle = '#8fd8ff';
+      ctx.fill();
+      ctx.restore();
+    }
 
     /* 受击白闪 */
     if (this.hitFlash > 0) {
@@ -530,7 +655,6 @@ class Shooter extends Enemy {
     this.game.particles.burst(this.x + Math.cos(base) * this.r, this.y + Math.sin(base) * this.r, 6, {
       speed: 120, life: 0.3, size: 3, color: '#aef0ff', dir: base, spread: 1.2
     });
-    this.game.addShake(1.2);
   }
 
   onDraw(ctx) {
@@ -679,7 +803,6 @@ class Charger extends Enemy {
           speed: 200, life: 0.35, size: 4, color: '#ff6b5c',
           dir: this.dashDir + Math.PI, spread: 1.1
         });
-        this.game.addShake(2);
       }
     } else if (this.state === 'dash') {
       this.stateT -= dt;
@@ -706,7 +829,7 @@ class Charger extends Enemy {
           speed: 220, life: 0.5, size: 4, color: '#ffd0b0',
           colors: ['#ffd0b0', '#ff8a6a', '#ffffff']
         });
-        this.game.addShake(5);
+        this.game.addShake(3);
         this.game.damageNumbers.add(this.x, this.y - this.r - 8, '撞击', {
           color: '#ffc0a0', life: 0.7
         });
@@ -878,7 +1001,7 @@ class Warden extends Enemy {
       this.phase = wantPhase;
       this.state = 'hover';
       this.stateT = 0.7;
-      this.game.addShake(10);
+      this.game.addShake(6);
       this.game.particles.ring(this.x, this.y, '#ff4d6b', 30, 280);
       this.game.ui.showBanner('守望者 · 形态 ' + wantPhase, '回廊开始崩解', 1.4);
       /* 召唤残形 */
@@ -915,7 +1038,6 @@ class Warden extends Enemy {
       this.vx *= 0.85; this.vy *= 0.85;
       if (this.stateT <= 0) {
         this._ring(this.phase >= 3 ? 18 : 14, 250, this.rng.range(0, TAU));
-        this.game.addShake(3);
         this.ringLeft--;
         if (this.ringLeft > 0) this.stateT = 0.28;
         else { this.state = 'hover'; this.stateT = 0.9; }
@@ -946,7 +1068,7 @@ class Warden extends Enemy {
         this.dashDir = angleTo(this.x, this.y, p.x, p.y);
         this.state = 'dash';
         this.stateT = 0.5;
-        this.game.addShake(4);
+        this.game.addShake(2);
       }
     } else if (this.state === 'dash') {
       this.stateT -= dt;
@@ -1067,20 +1189,54 @@ class Warden extends Enemy {
 }
 
 /* ===========================================================
-   敌人工厂
+   敌人工厂（注册表驱动）
+   —— 新增敌人 = 在 enemy_roster.js 里 EnemyFactory.register(...)
+   —— 这里只登记最初的三只 + Boss，其余在 roster 中追加
    =========================================================== */
 const EnemyFactory = {
+  registry: {},
+
+  register(id, cls, def) {
+    this.registry[id] = { cls: cls, def: def || {} };
+  },
+
+  defOf(type) {
+    const r = this.registry[type];
+    return r ? r.def : {};
+  },
+
+  /* 出生点半径（房间生成时用） */
+  radiusOf(type) {
+    const d = this.defOf(type);
+    return d.r || (type === 'boss' ? 34 : 16);
+  },
+
   create(game, type, x, y, tier, rng) {
-    let e;
-    switch (type) {
-      case 'shooter': e = new Shooter(game, x, y, rng); break;
-      case 'charger': e = new Charger(game, x, y, rng); break;
-      case 'boss': e = new Warden(game, x, y, rng); break;
-      case 'chaser':
-      default: e = new Chaser(game, x, y, rng); break;
+    const reg = this.registry[type];
+    let e = null;
+    if (reg) {
+      e = new reg.cls(game, x, y, rng);
+    } else {
+      /* 未注册类型的兜底（不应该发生） */
+      e = new Chaser(game, x, y, rng);
     }
     e.type = type;
+    const d = this.defOf(type);
+    if (d.coin) e.coinBonus = d.coin;
     e.applyTier(tier || 0);
     return e;
   }
 };
+
+/* 注意：这三只最初的敌人也要登记 cat / cost / minDepth，
+   否则新的编队系统会把它们排除在生成池之外 */
+EnemyFactory.register('chaser', Chaser, {
+  r: 16, cat: 'melee', role: 'chase', cost: 2, minDepth: 0, tags: ['mobile'], coin: 0
+});
+EnemyFactory.register('shooter', Shooter, {
+  r: 18, cat: 'ranged', role: 'burst', cost: 3, minDepth: 0, tags: [], coin: 1
+});
+EnemyFactory.register('charger', Charger, {
+  r: 19, cat: 'melee', role: 'charge', cost: 4, minDepth: 0, tags: ['mobile'], coin: 3
+});
+EnemyFactory.register('boss', Warden, { r: 34, coin: 0, hidden: true, cat: 'boss' });

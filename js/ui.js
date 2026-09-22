@@ -18,12 +18,20 @@ class UI {
     this.elBtn = document.getElementById('ov-btn');
     this.elHint = document.getElementById('ov-hint');
     this.elSeed = document.getElementById('seed-input');
+    this.elShakeBtn = document.getElementById('shake-btn');
+    this.refreshShakeBtn();
 
     this.elBtn.addEventListener('click', () => {
       this.game.primaryAction();
     });
 
     this.setOverlay('title');
+  }
+
+  /* HUD 上的「抖动强度」按钮文案 */
+  refreshShakeBtn() {
+    if (!this.elShakeBtn) return;
+    this.elShakeBtn.textContent = '抖动 · ' + this.game.shakeLabel();
   }
 
   /* 玩家当前 Build 的一句话摘要（遮罩面板用） */
@@ -70,7 +78,7 @@ class UI {
       this.elText.innerHTML =
         `SEED　<b>${g.seed}</b><br>` +
         `层数　<b>第 ${g.floor} 层</b><br>` +
-        `余烬　<b>${g.embers}</b><br>` +
+        `金币　<b>${g.coins}</b><br>` +
         `已探索　<b>${Object.keys(g.map ? g.map.visited : {}).length} / ${g.map ? g.map.cells.length : 0}</b> 间<br>` +
         `持有道具　<b>${g.player ? g.player.build.length : 0}</b> 件<br>` +
         `<span style="color:#8fa3b5">${this.buildSummary(g)}</span>`;
@@ -189,7 +197,7 @@ class UI {
     ctx.textAlign = 'left';
     ctx.font = '700 12px "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = '#ffd35e';
-    ctx.fillText(`◈ ${g.embers} 余烬`, bx, by + 40);
+    ctx.fillText(`◈ ${g.coins} 金币`, bx, by + 40);
 
     ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
     const roomName = g.room ? g.room.meta.cn : '-';
@@ -203,6 +211,9 @@ class UI {
     ctx.fillStyle = '#5d6f7e';
     ctx.font = '600 11px "Segoe UI", system-ui, sans-serif';
     ctx.fillText(`SEED ${g.seed}　击碎 ${g.kills}　${playerStatsText(p)}`, bx, by + 58);
+
+    /* ---- 增益 / 诅咒条 ---- */
+    this.drawBuffs(ctx, bx, by + 76);
 
     /* ---- 右上：小地图 ---- */
     this.drawMinimap(ctx);
@@ -273,88 +284,137 @@ class UI {
     if (!p || !p.build) return;
 
     const slots = p.build.slots;
+    this._hoverItem = null;
+    if (!slots.length) return;
+
     const mx = g.mouseWorld.x, my = g.mouseWorld.y;
-    const rowH = 18;
-    const colW = 236;
-    const maxRows = 9;
-    const maxShow = maxRows * 2;
-    const shown = Math.min(slots.length, maxShow);
-    const cols = shown > maxRows ? 2 : 1;
-    const rowsUsed = Math.min(maxRows, shown);
-    const bottomY = VIEW_H - 28;
-    const panelH = 24 + rowsUsed * rowH;
-    const px = 26, py = bottomY - panelH;
-    const panelW = colW * cols;
+    const combos = p.build.comboList || [];
+
+    /* ---- 布局：单行紧凑色块条，贴在左下角 ---- */
+    const CHIP = 17, GAP = 4, MAX_CHIP = 14;
+    const x0 = 26;
+    const y0 = VIEW_H - 32;                       // 色块顶边
+    const shown = Math.min(slots.length, MAX_CHIP);
+    const extra = slots.length - shown;
+    let stripW = shown * CHIP + (shown - 1) * GAP + (extra > 0 ? 30 : 0);
+
+    /* 悬停热区（略放大好进入） */
+    const hot = mx >= x0 - 10 && mx <= x0 + stripW + (combos.length ? 74 : 10)
+             && my >= y0 - 14 && my <= y0 + CHIP + 14;
 
     ctx.save();
-    ctx.fillStyle = 'rgba(6,10,15,0.72)';
-    roundRectPath(ctx, px - 8, py - 8, panelW + 16, panelH + 12, 8);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(120,190,220,0.18)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
 
-    /* 标题 */
-    ctx.font = '700 11px "Segoe UI", "PingFang SC", system-ui, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = '#7fd7ea';
-    ctx.fillText(`BUILD · ${p.build.length} 件道具`, px, py + 4);
+    /* ---- 悬停时才展开完整列表（平时不占视野） ---- */
+    if (hot && !g.touchMode) {
+      const rowH = 17, colW = 214, maxRows = 8;
+      const cols = slots.length > maxRows ? 2 : 1;
+      const rows = Math.min(maxRows, Math.ceil(slots.length / cols));
+      const panelH = 26 + rows * rowH;
+      const px2 = x0 - 8, py2 = y0 - 12 - panelH;
 
-    /* 生效中的组合 */
-    this._hoverItem = null;
-    if (p.build.comboList.length) {
-      let cx2 = px + 118;
-      ctx.font = '700 10.5px "Segoe UI", "PingFang SC", system-ui, sans-serif';
-      ctx.fillStyle = '#c08bff';
-      const names = p.build.comboList.slice(0, 3).map(c => c.name).join(' · ');
-      const more = p.build.comboList.length > 3 ? ` +${p.build.comboList.length - 3}` : '';
-      ctx.fillText('组合 ' + names + more, cx2, py + 4);
+      ctx.fillStyle = 'rgba(6,10,15,0.88)';
+      roundRectPath(ctx, px2, py2, colW * cols + 16, panelH, 8);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(120,190,220,0.22)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      ctx.font = '700 11px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = '#7fd7ea';
+      ctx.fillText(`BUILD · ${p.build.length} 件道具`, px2 + 8, py2 + 15);
+
+      if (combos.length) {
+        ctx.font = '700 10.5px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+        ctx.fillStyle = '#c08bff';
+        const names = combos.slice(0, 3).map(c => c.name).join(' · ');
+        const more = combos.length > 3 ? ` +${combos.length - 3}` : '';
+        ctx.fillText('组合 ' + names + more, px2 + 126, py2 + 15);
+      }
+
+      for (let i = 0; i < slots.length; i++) {
+        const it = ITEM_BY_ID[slots[i].id];
+        if (!it) continue;
+        const col = Math.floor(i / maxRows);
+        const row = i % maxRows;
+        if (col >= cols) break;
+        const rx = px2 + 8 + col * colW;
+        const ry = py2 + 32 + row * rowH;
+        const inRow = mx >= rx - 4 && mx <= rx + colW - 12 && my >= ry - 10 && my <= ry + 5;
+        if (inRow) this._hoverItem = { item: it, n: slots[i].n };
+
+        ctx.fillStyle = it.color;
+        roundRectPath(ctx, rx, ry - 9, 10, 10, 3);
+        ctx.fill();
+
+        const label = it.name + (slots[i].n > 1 ? ` ×${slots[i].n}` : '');
+        ctx.font = '700 11px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+        ctx.fillStyle = inRow ? '#ffffff' : '#d6e3ee';
+        ctx.fillText(label, rx + 15, ry);
+        if (inRow) {
+          ctx.strokeStyle = 'rgba(255,220,150,0.55)';
+          ctx.lineWidth = 1;
+          roundRectPath(ctx, rx - 4, ry - 10, colW - 12, 16, 4);
+          ctx.stroke();
+        }
+      }
     }
 
-    /* 道具行（列优先排布） */
+    /* ---- 常驻：一行小色块（半透明，鼠标移近才变亮） ---- */
+    ctx.globalAlpha = hot ? 1 : 0.6;
     for (let i = 0; i < shown; i++) {
       const it = ITEM_BY_ID[slots[i].id];
       if (!it) continue;
-      const col = i >= maxRows ? 1 : 0;
-      const row = i % maxRows;
-      const x = px + col * colW;
-      const rowY = py + 22 + row * rowH;
+      const x = x0 + i * (CHIP + GAP);
+      const inChip = mx >= x - 2 && mx <= x + CHIP + 2 && my >= y0 - 6 && my <= y0 + CHIP + 6;
+      if (inChip) this._hoverItem = { item: it, n: slots[i].n };
 
-      /* 命中矩形（供悬停判定） */
-      const inRow = mx >= x - 4 && mx <= x + colW - 12 && my >= rowY - 11 && my <= rowY + 6;
-      if (inRow) this._hoverItem = { item: it, n: slots[i].n };
-
-      /* 分类色块 */
       const cat = ITEM_CAT[it.cat] || ITEM_CAT.special;
       ctx.fillStyle = it.color;
-      roundRectPath(ctx, x, rowY - 9, 11, 11, 3);
+      roundRectPath(ctx, x, y0, CHIP, CHIP, 4);
       ctx.fill();
+      ctx.strokeStyle = inChip ? 'rgba(255,235,190,0.9)' : 'rgba(10,16,22,0.75)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
 
-      /* 名称 + 层数 */
-      ctx.font = '700 11px "Segoe UI", "PingFang SC", system-ui, sans-serif';
-      ctx.fillStyle = inRow ? '#ffffff' : '#d6e3ee';
-      const label = it.name + (slots[i].n > 1 ? ` ×${slots[i].n}` : '');
-      ctx.fillText(label, x + 16, rowY);
-
-      /* 分类标记 */
-      ctx.font = '600 9.5px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      /* 左上小角标 = 分类色；堆叠数画在方块右下 */
       ctx.fillStyle = cat.color;
-      const nameW = ctx.measureText(label).width;
-      ctx.fillText(cat.cn, x + 18 + nameW + 4, rowY);
-
-      if (inRow) {
-        ctx.strokeStyle = 'rgba(255,220,150,0.55)';
-        ctx.lineWidth = 1;
-        roundRectPath(ctx, x - 4, rowY - 11, colW - 12, 17, 4);
+      ctx.fillRect(x + 2.5, y0 + 2.5, 3.5, 3.5);
+      if (slots[i].n > 1) {
+        ctx.font = '800 9px "Segoe UI", system-ui, sans-serif';
+        ctx.fillStyle = 'rgba(8,12,18,0.85)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(slots[i].n), x + CHIP - 5, y0 + CHIP - 5);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+      }
+      if (inChip) {
+        ctx.strokeStyle = 'rgba(255,225,160,0.9)';
+        ctx.lineWidth = 1.4;
+        roundRectPath(ctx, x - 2, y0 - 2, CHIP + 4, CHIP + 4, 5);
         ctx.stroke();
       }
     }
 
-    if (slots.length > maxShow) {
-      ctx.font = '600 10px "Segoe UI", system-ui, sans-serif';
-      ctx.fillStyle = '#6d8296';
-      ctx.fillText(`+${slots.length - maxShow} 件未显示`, px + colW, py + 4);
+    /* 超出显示上限 */
+    if (extra > 0) {
+      ctx.font = '700 10px "Segoe UI", system-ui, sans-serif';
+      ctx.fillStyle = '#8fa3b5';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`+${extra}`, x0 + shown * (CHIP + GAP) + 4, y0 + CHIP / 2 + 1);
+      ctx.textBaseline = 'alphabetic';
+    }
+
+    /* 组合数小徽标 */
+    if (combos.length) {
+      const bx = x0 + stripW + 10;
+      ctx.font = '700 10px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      ctx.fillStyle = '#c08bff';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`⚡${combos.length}`, bx, y0 + CHIP / 2 + 1);
+      ctx.textBaseline = 'alphabetic';
     }
     ctx.restore();
   }
@@ -462,10 +522,12 @@ class UI {
     ctx.strokeStyle = 'rgba(140,180,200,0.35)';
     ctx.lineWidth = 2;
     for (const cd of map.cells) {
+      if (cd.hidden && !cd.discovered) continue;
       if (!map.isVisited(cd) && cd !== map.current) continue;
       for (const d of DIRS) {
         const n = cd.links[d.side];
         if (!n) continue;
+        if (n.hidden && !n.discovered) continue;
         ctx.beginPath();
         ctx.moveTo(cxOf(cd.c), cyOf(cd.r));
         ctx.lineTo(lerp(cxOf(cd.c), cxOf(n.c), 0.5), lerp(cyOf(cd.r), cyOf(n.r), 0.5));
@@ -473,8 +535,9 @@ class UI {
       }
     }
 
-    /* 房间格 */
+    /* 房间格（未发现的隐藏房不显示） */
     for (const cd of map.cells) {
+      if (cd.hidden && !cd.discovered) continue;
       const meta = ROOM_META[cd.type] || ROOM_META.combat;
       const visited = map.isVisited(cd);
       const isCurrent = (cd === map.current);
@@ -525,7 +588,7 @@ class UI {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = '#6d8296';
-    ctx.fillText(`回廊地图　${Object.keys(map.visited).length}/${map.cells.length}`, ox + w / 2, oy + h + pad + 12);
+    ctx.fillText(`回廊地图　${map.countableVisited()}/${map.countableRooms()}`, ox + w / 2, oy + h + pad + 12);
     ctx.textAlign = 'left';
     ctx.restore();
   }
@@ -598,6 +661,32 @@ class UI {
     ctx.arc(0, 0, 1.8, 0, TAU);
     ctx.fill();
     ctx.restore();
+  }
+
+  /* ---------------------------------------------------------
+     增益 / 诅咒条（左上角第三行）
+     --------------------------------------------------------- */
+  drawBuffs(ctx, x, y) {
+    const list = this.game.player ? this.game.player.buffs.list : [];
+    if (!list.length) return;
+    let cx = x;
+    for (const b of list.slice(0, 8)) {
+      const label = b.name + (b.dur > 0 ? ' ' + Math.ceil(b.t) + 's' : '');
+      ctx.font = '600 10.5px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      const w = ctx.measureText(label).width + 18;
+      if (cx + w > VIEW_W * 0.42) break;
+      ctx.fillStyle = 'rgba(6,10,15,0.72)';
+      roundRectPath(ctx, cx, y - 10, w, 17, 5);
+      ctx.fill();
+      ctx.strokeStyle = b.kind === 'curse' ? 'rgba(192,139,255,0.55)' : 'rgba(125,255,176,0.45)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = b.color;
+      ctx.fillRect(cx + 5, y - 5, 5, 7);
+      ctx.fillStyle = b.kind === 'curse' ? '#d8c2ff' : '#cfe6d8';
+      ctx.fillText(label, cx + 13, y + 2.5);
+      cx += w + 6;
+    }
   }
 
   /* ---------------------------------------------------------

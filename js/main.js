@@ -21,6 +21,15 @@
       });
     }
 
+    /* 屏幕抖动强度：关 / 弱 / 中 / 强（会记住选择） */
+    const shakeBtn = document.getElementById('shake-btn');
+    if (shakeBtn) {
+      shakeBtn.addEventListener('click', () => {
+        game.cycleShake();
+        shakeBtn.blur();
+      });
+    }
+
     /* 竖屏提示：可以关掉，关掉后不再弹出 */
     const rhBtn = document.getElementById('rh-btn');
     if (rhBtn) {

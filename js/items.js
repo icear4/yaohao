@@ -436,6 +436,13 @@ class Build {
       if (it.flags) for (const k in it.flags) md[k] = (md[k] || 0) + it.flags[k] * n;
     }
 
+    /* 1b. 临时增益 / 诅咒（与道具完全叠加，来源见 buff.js） */
+    if (p.buffs) {
+      const bf = p.buffs.aggregate();
+      for (const k in bf.stats) st[k] = (st[k] || 0) + bf.stats[k];
+      for (const k in bf.mods) md[k] = (md[k] || 0) + bf.mods[k];
+    }
+
     /* 2. 最终属性（供组合条件判断） */
     const fin = {
       maxHp: Math.max(20, b.maxHp + st.maxHp),
