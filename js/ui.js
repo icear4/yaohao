@@ -34,6 +34,11 @@ class UI {
       this.game.primaryAction();
     });
 
+    /* 可滚动面板：滚动时刷新底部渐隐提示 */
+    if (this.elText && this.elText.addEventListener) {
+      this.elText.addEventListener('scroll', () => this._syncScroll(false));
+    }
+
     /* 面板内的动态按钮（角色 / 统计 / 图鉴 / 返回 / 重置存档） */
     if (this.elActions) {
       this.elActions.addEventListener('click', (ev) => {
@@ -172,11 +177,13 @@ class UI {
   setOverlay(mode) {
     this.overlayMode = mode;
     this.renderActions();
-    /* 角色 / 统计 / 图鉴页面需要更宽的面板 */
+    /* 角色 / 统计 / 图鉴页面需要更宽的面板，并且正文可滚动 */
     if (this.elPanel && this.elPanel.classList) {
       const wide = (mode === 'chars' || mode === 'stats' || mode === 'codex');
       if (wide) this.elPanel.classList.add('wide');
       else this.elPanel.classList.remove('wide');
+      if (wide) this.elPanel.classList.add('tall');
+      else this.elPanel.classList.remove('tall');
     }
     if (!mode) {
       this.overlay.classList.add('hidden');
@@ -249,7 +256,7 @@ class UI {
       this.elTitleEn.textContent = 'CHARACTERS';
       this.elText.innerHTML = this.charSelectHtml();
       this.elBtn.textContent = '开始探索';
-      this.elHint.textContent = '角色只是不同起手式，没有强弱之分 · 解锁条件见「解锁图鉴」';
+      this.elHint.textContent = '角色只是不同起手式，没有强弱之分　·　解锁条件见「解锁图鉴」';
       if (this.elSeed) this.elSeed.style.display = '';
     } else if (mode === 'stats') {
       this.elKicker.textContent = 'LIFETIME RECORDS';
@@ -265,9 +272,28 @@ class UI {
       this.elTitleEn.textContent = 'CODEX';
       this.elText.innerHTML = this.codexHtml();
       this.elBtn.textContent = '返回标题';
-      this.elHint.textContent = '解锁只拓宽随机池，不给任何局外数值加成';
+      this.elHint.textContent = '解锁只拓宽随机池，不给任何局外数值加成　·　列表可滚动（滚轮 / 拖动 / ↑↓）';
       if (this.elSeed) this.elSeed.style.display = 'none';
     }
+    /* 可滚动页面：回到顶部 + 刷新「下面还有内容」的渐隐提示 */
+    this._syncScroll(true);
+  }
+
+  /* 可滚动页面（角色 / 统计 / 图鉴）的滚动状态同步 */
+  _syncScroll(reset) {
+    const el = this.elText;
+    if (!el || !this.elPanel || !this.elPanel.classList) return;
+    if (!this.elPanel.classList.contains('tall')) {
+      this.elPanel.classList.remove('scrollable-bottom');
+      return;
+    }
+    if (reset && el.scrollTop !== undefined) {
+      try { el.scrollTop = 0; } catch (e) { /* 某些环境下只读，忽略 */ }
+    }
+    const sh = el.scrollHeight || 0, ch = el.clientHeight || 0;
+    const st = el.scrollTop || 0;
+    const atBottom = (sh - ch - st) < 8;
+    this.elPanel.classList.toggle('scrollable-bottom', (sh - ch > 4) && !atBottom);
   }
 
   /* ---------------- 角色选择页 ---------------- */

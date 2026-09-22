@@ -1131,10 +1131,23 @@ class Game {
 
     if (this.state === 'title') {
       const om = this.ui ? this.ui.overlayMode : null;
-      if (om === 'stats' || om === 'codex') {
-        /* 子页面：Enter / ESC 返回标题 */
+      if (om === 'stats' || om === 'codex' || om === 'chars') {
+        /* 子页面：Enter / ESC 返回标题，↑↓ 滚动列表 */
         if (this.input.wasPressed('Enter') || this.input.wasPressed('Escape')) {
           this.ui.setOverlay('title');
+        } else {
+          const el = this.ui.elText;
+          if (el && el.scrollTop !== undefined) {
+            const step = this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight') ? 220 : 72;
+            if (this.input.wasPressed('ArrowDown')) el.scrollTop += step;
+            else if (this.input.wasPressed('ArrowUp')) el.scrollTop -= step;
+            else if (this.input.wasPressed('PageDown')) el.scrollTop += step * 4;
+            else if (this.input.wasPressed('PageUp')) el.scrollTop -= step * 4;
+            else if (this.input.wasPressed('Home')) el.scrollTop = 0;
+            if (this.input.wasPressed('ArrowDown') || this.input.wasPressed('ArrowUp') ||
+                this.input.wasPressed('PageDown') || this.input.wasPressed('PageUp') ||
+                this.input.wasPressed('Home')) this.ui._syncScroll(false);
+          }
         }
       } else if (this.input.wasPressed('Enter') || this.input.wasPressed('Space')) {
         this.startRun(this.ui.readSeedInput());
