@@ -75,6 +75,13 @@ class Player {
     this.trailT = 0;      // 烬迹计时
     this.slowT = 0;       // 被泥沼等减速的剩余时间
 
+    /* ---- 受击反馈（手感层） ---- */
+    this.kx = 0;          // 受击击退速度
+    this.ky = 0;
+    this.hurtDir = 0;     // 受击来向（画方向指示）
+    this.hurtRing = 0;    // 受击冲击环
+    this.muzzleFlash = 0; // 开火枪口闪光
+
     /* ---- 角色能力运行时状态（只有对应角色会用到） ---- */
     this.heat = 0;        // 灼刃：过热层数
     this.heatT = 0;       // 灼刃：停火倒计时
@@ -172,6 +179,17 @@ class Player {
       }
     }
 
+    /* ---- 受击击退：独立的短促位移，衰减很快，不干扰走位手感 ---- */
+    if (this.kx !== 0 || this.ky !== 0) {
+      this.x += this.kx * dt;
+      this.y += this.ky * dt;
+      const kd = Math.max(0, 1 - 11 * dt);
+      this.kx *= kd; this.ky *= kd;
+      if (Math.abs(this.kx) < 2 && Math.abs(this.ky) < 2) { this.kx = 0; this.ky = 0; }
+    }
+    if (this.hurtRing > 0) this.hurtRing = Math.max(0, this.hurtRing - dt * 2.6);
+    if (this.muzzleFlash > 0) this.muzzleFlash = Math.max(0, this.muzzleFlash - dt * 9);
+
     /* 瞄准 */
     const m = this.game.mouseWorld;
     this.aim = angleTo(this.x, this.y, m.x, m.y);
@@ -268,13 +286,29 @@ class Player {
 
     this.shotsFired++;
     this.recoil = 1;
+    this.muzzleFlash = 1;
     const os = this._abil('onShoot');
     if (os) os(this, this.game);
-    this.game.particles.muzzle(
-      this.x + Math.cos(this.aim) * (this.r + 10),
-      this.y + Math.sin(this.aim) * (this.r + 10),
-      this.aim, this.skin.bullet
-    );
+
+    /* ---- 开火反馈：枪口闪光 + 火花 + 抛壳 + 轻微后坐位移 ---- */
+    const mxx = this.x + Math.cos(this.aim) * (this.r + 10);
+    const mxy = this.y + Math.sin(this.aim) * (this.r + 10);
+    this.game.particles.muzzle(mxx, mxy, this.aim, this.skin.bullet);
+    this.game.particles.spawn(mxx, mxy,
+      Math.cos(this.aim) * rand(60, 190) + rand(-40, 40),
+      Math.sin(this.aim) * rand(60, 190) + rand(-40, 40),
+      rand(0.06, 0.14), rand(6, 11), 'rgba(255,240,200,0.55)',
+      { drag: 7, shrink: false });
+    /* 抛壳：朝射口侧后方弹出一枚小碎片 */
+    const ea = this.aim + Math.PI * 0.5 * (chance(0.5) ? 1 : -1);
+    this.game.particles.spawn(this.x, this.y,
+      Math.cos(ea) * rand(70, 150), Math.sin(ea) * rand(70, 150),
+      rand(0.3, 0.55), rand(2.2, 3.4), 'rgba(255,190,110,0.75)',
+      { drag: 3.6, shape: 'shard', rot: ea, spin: rand(-12, 12) });
+    /* 后坐：朝反方向轻推一点点（不影响可控性） */
+    this.x -= Math.cos(this.aim) * 3.2;
+    this.y -= Math.sin(this.aim) * 3.2;
+    this.game.room.clampEntity(this, true);
   }
 
   /* ---------------------------------------------------------
@@ -291,25 +325,34 @@ class Player {
     this.hp -= real;
     this.invuln = this.invulnTime;
     this.hurtFlash = 1;
-    this.game.addShake(4.5);
+    this.hurtRing = 1;
+
+    /* ---- 屏幕震动：随伤害占最大生命的比例增强，但始终"轻微" ---- */
+    const weight = clamp(real / Math.max(1, this.maxHp), 0, 1);
+    this.game.addShake(3.2 + 5.2 * weight, srcX, srcY);
+    HitStop.request(0.05 + 0.05 * weight, weight > 0.25);
 
     /* 角色受伤钩子（护壁展开等） */
     const oh = this._abil('onHurt');
     if (oh) oh(this, this.game);
 
     const ang = angleTo(srcX, srcY, this.x, this.y);
-    this.game.particles.burst(this.x, this.y, 12, {
-      speed: 190, life: 0.4, size: 4, color: '#ff5d5d',
+    this.hurtDir = ang;
+    this.game.particles.burst(this.x, this.y, 12 + Math.round(8 * weight), {
+      speed: 190 + 120 * weight, life: 0.4, size: 4, color: '#ff5d5d',
       dir: ang, spread: 2.2, colors: ['#ff5d5d', '#ff9a6a', '#ffd0a0']
     });
+    this.game.particles.ring(this.x, this.y, '#ff5d5d', 10 + Math.round(8 * weight), 150);
     this.game.damageNumbers.add(this.x, this.y - 18, amount, {
       color: '#ff7a7a', life: 0.85, vy: -52
     });
+    if (typeof Juice !== 'undefined') Juice.flash(this.game, '#ff3b3b', 0.16 + 0.22 * weight, 0.2);
+    if (this.game.ui) this.game.ui.hitVignette = Math.max(this.game.ui.hitVignette, 0.7 + 0.3 * weight);
 
-    /* 轻微击退 */
-    const push = 46;
-    this.x += Math.cos(ang) * push * 0.35;
-    this.y += Math.sin(ang) * push * 0.35;
+    /* ---- 击退：来得快去得快，明显但不会把人推到失控 ---- */
+    const push = 120 + 190 * weight;
+    this.kx += Math.cos(ang) * push;
+    this.ky += Math.sin(ang) * push;
     this.game.room.clampEntity(this, true);
 
     if (this.hp <= 0) {
@@ -344,6 +387,38 @@ class Player {
 
     ctx.save();
     ctx.translate(this.x, this.y);
+
+    /* 开火枪口闪光：一圈短促的亮光，让射击"有落地感" */
+    if (this.muzzleFlash > 0) {
+      const mf = this.muzzleFlash;
+      ctx.save();
+      ctx.rotate(this.aim);
+      ctx.globalAlpha = mf * 0.55;
+      const mg = ctx.createRadialGradient(this.r * 0.9, 0, 1, this.r * 0.9, 0, this.r * 2.6);
+      mg.addColorStop(0, 'rgba(255,246,214,0.95)');
+      mg.addColorStop(0.4, 'rgba(255,179,71,0.55)');
+      mg.addColorStop(1, 'rgba(255,120,40,0)');
+      ctx.fillStyle = mg;
+      ctx.beginPath();
+      ctx.arc(this.r * 0.9, 0, this.r * 2.6, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    /* 无敌时间：脚下一圈逆时针转的虚线环，明确"现在打不到我" */
+    if (this.invuln > 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.28 + 0.22 * Math.sin(this.game.time * 18);
+      ctx.strokeStyle = '#8fe9ff';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 7]);
+      ctx.lineDashOffset = -this.game.time * 90;
+      ctx.beginPath();
+      ctx.arc(0, 0, this.r * 1.55, 0, TAU);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
 
     /* 磐盾：护壁展开时脚下一圈绿环 */
     if (this.wallT > 0) {
@@ -490,13 +565,34 @@ class Player {
     ctx.fill();
     ctx.restore();
 
-    /* 受击红闪 */
+    /* 受击：红闪 + 白闪叠加（先白后红，一瞬间看清"挨打了"） */
     if (this.hurtFlash > 0) {
-      ctx.globalAlpha = this.hurtFlash * 0.55;
-      ctx.fillStyle = '#ff4d4d';
+      const hf = this.hurtFlash;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = hf * 0.75;
+      ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.arc(0, 0, this.r * 1.15, 0, TAU);
+      ctx.arc(0, 0, this.r * 1.18, 0, TAU);
       ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = hf * 0.45;
+      ctx.fillStyle = '#ff3b3b';
+      ctx.beginPath();
+      ctx.arc(0, 0, this.r * 1.28, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    /* 受击方向：来向的一段厚弧，知道伤害从哪里来 */
+    if (this.hurtRing > 0) {
+      ctx.save();
+      ctx.globalAlpha = this.hurtRing * 0.7;
+      ctx.strokeStyle = '#ff5d5d';
+      ctx.lineWidth = 4 * this.hurtRing + 1;
+      ctx.beginPath();
+      ctx.arc(0, 0, this.r * 1.9, this.hurtDir - 0.62, this.hurtDir + 0.62);
+      ctx.stroke();
+      ctx.restore();
     }
 
     ctx.restore();

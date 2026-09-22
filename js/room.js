@@ -37,7 +37,9 @@ class Room {
 
     this.state = this.isCombatRoom ? 'fighting' : 'clear';
     this.doorsOpen = !this.isCombatRoom;
+    this.doorAnim = this.doorsOpen ? 1 : 0;   // 门开合动画进度（0 关 / 1 开）
     this.clearTime = 0;
+    this.enterT = 0;                          // 进入房间的镜头效果进度 0→1
     this.spawnFx = 0;
     this.everCleared = false;
     this._spawnCounter = 0;
@@ -399,6 +401,15 @@ class Room {
   update(dt) {
     if (this.spawnFx > 0) this.spawnFx -= dt;
 
+    /* 进门演出：一次快速的暗场 + 冲击环，切换房间时给一个明确的"落地" */
+    if (this.enterT < 1) this.enterT = Math.min(1, this.enterT + dt * 2.2);
+    /* 门开合动画 */
+    const dTarget = this.doorsOpen ? 1 : 0;
+    if (this.doorAnim !== dTarget) {
+      this.doorAnim += (dTarget - this.doorAnim) * Math.min(1, dt * 8);
+      if (Math.abs(dTarget - this.doorAnim) < 0.01) this.doorAnim = dTarget;
+    }
+
     /* 章节背景效果（纯表现） */
     if (this.chapterFx) this.chapterFx.update(dt);
 
@@ -464,6 +475,7 @@ class Room {
      --------------------------------------------------------- */
   onReenter() {
     this.spawnFx = 0;
+    this.enterT = 0;                 // 每次进入都重播一次入场效果
     if (this.state === 'fighting') {
       /* 战斗未结束就返回（理论上门是关的）：重新锁门 */
       this.doorsOpen = false;
@@ -477,6 +489,18 @@ class Room {
     this.doorsOpen = true;
     this.clearTime = 0;
     this.everCleared = true;
+
+    /* ---- 清怪演出：金色冲击波从房间中心推到四壁 + 短暂闪屏 ---- */
+    const ccx = ARENA.x + ARENA.w / 2, ccy = ARENA.y + ARENA.h / 2;
+    if (typeof Juice !== 'undefined') {
+      Juice.ring(this.game, ccx, ccy, '#ffe08a', Math.max(ARENA.w, ARENA.h) * 0.78, 0.62, 5);
+      Juice.ring(this.game, ccx, ccy, '#ffffff', ARENA.h * 0.42, 0.4, 3);
+      Juice.flash(this.game, '#ffe08a', 0.16, 0.22);
+    }
+    this.game.particles.ring(ccx, ccy, '#ffe08a', 24, 320);
+    this.game.particles.burst(ccx, ccy, 16, {
+      speed: 240, life: 0.7, size: 4, colors: ['#ffe08a', '#ffffff', '#ffb347'], drag: 3
+    });
 
     /* Boss 房通关 → 解除房间（开门）+ 层间裂隙 + 大量金币 + 一件强力遗物 */
     if (this.type === ROOM_TYPE.BOSS) {
@@ -591,44 +615,77 @@ class Room {
     for (const pr of this.props) pr.draw(ctx);
   }
 
-  /* 实体之上的一层：柱体 / 电弧塔 / 章节氛围 */
+  /* 实体之上的一层：柱体 / 电弧塔 / 章节氛围 / 入场演出 */
   drawOverLayer(ctx) {
     if (this.hazards && this.hazards.drawOver) this.hazards.drawOver(ctx);
     if (this.chapterFx) this.chapterFx.drawOver(ctx);
+    this._drawEnterFx(ctx);
+  }
+
+  /* ---- 进入房间：暗场淡出 + 一圈从中心推开的冲击环 ---- */
+  _drawEnterFx(ctx) {
+    if (this.enterT >= 1) return;
+    const t = this.enterT;
+    const e = easeOutCubic(t);
+    const cx = ARENA.x + ARENA.w / 2, cy = ARENA.y + ARENA.h / 2;
+
+    ctx.save();
+    /* 暗场（只压一瞬，不打断战斗节奏） */
+    ctx.globalAlpha = 0.6 * (1 - e);
+    ctx.fillStyle = '#05070c';
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+    /* 冲击环：章节主色，从中心推向四壁 */
+    ctx.globalAlpha = (1 - t) * 0.55;
+    ctx.strokeStyle = this.chapter.pal.accent;
+    ctx.lineWidth = 4 * (1 - t) + 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 60 + e * 760, 0, TAU);
+    ctx.stroke();
+
+    /* 第二圈更细更快，做出"回声"的感觉 */
+    ctx.globalAlpha = (1 - t) * 0.28;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 20 + e * 980, 0, TAU);
+    ctx.stroke();
+    ctx.restore();
   }
 
   drawWalls(ctx) {
     const walls = this.doorsOpen ? this.wallsOpen : this.wallsClosed;
 
+    const o = this.doorAnim;
     for (const d of this.doors) {
       const g = d.gap;
+      const horiz = g.w > g.h;
+      const len = horiz ? g.w : g.h;
       ctx.fillStyle = '#0b1119';
       ctx.fillRect(g.x, g.y, g.w, g.h);
 
-      if (this.doorsOpen) {
-        const pulse = 0.5 + 0.5 * Math.sin(this.clearTime * 3.4);
-        const grad = ctx.createLinearGradient(g.x, g.y, g.x + (g.w > g.h ? 0 : g.w), g.y + (g.h > g.w ? g.h : 0));
-        grad.addColorStop(0, 'rgba(90,255,190,0.05)');
-        grad.addColorStop(0.5, `rgba(120,255,200,${0.20 + 0.10 * pulse})`);
-        grad.addColorStop(1, 'rgba(90,255,190,0.05)');
-        ctx.fillStyle = grad;
-        ctx.fillRect(g.x, g.y, g.w, g.h);
-
-        ctx.strokeStyle = 'rgba(140,255,210,0.75)';
-        ctx.lineWidth = 2.5;
-        ctx.strokeRect(g.x + 1, g.y + 1, g.w - 2, g.h - 2);
-      } else {
-        ctx.fillStyle = 'rgba(255,70,60,0.13)';
-        ctx.fillRect(g.x, g.y, g.w, g.h);
+      /* ---- 闸门：整块墙从中间向两侧滑开（o=0 封死 / o=1 全开） ---- */
+      if (o < 0.999) {
+        const half = (len - len * o) * 0.5;
         ctx.save();
+        ctx.fillStyle = this.chapter.pal.wall;
+        if (horiz) {
+          ctx.fillRect(g.x, g.y, half, g.h);
+          ctx.fillRect(g.x + len - half, g.y, half, g.h);
+        } else {
+          ctx.fillRect(g.x, g.y, g.w, half);
+          ctx.fillRect(g.x, g.y + len - half, g.w, half);
+        }
+        /* 封锁纹：随闸门一起淡出 */
         ctx.beginPath();
         ctx.rect(g.x, g.y, g.w, g.h);
         ctx.clip();
-        ctx.strokeStyle = 'rgba(255,110,90,0.32)';
+        ctx.globalAlpha = 0.55 * (1 - o);
+        ctx.fillStyle = 'rgba(255,70,60,0.20)';
+        ctx.fillRect(g.x, g.y, g.w, g.h);
+        ctx.globalAlpha = 0.5 * (1 - o);
+        ctx.strokeStyle = 'rgba(255,110,90,0.55)';
         ctx.lineWidth = 3;
         const off = (this.game.time * 42) % 22;
-        const horiz = g.w > g.h;
-        const len = horiz ? g.w : g.h;
         for (let i = -1; i < len / 22 + 2; i++) {
           ctx.beginPath();
           if (horiz) {
@@ -643,9 +700,23 @@ class Room {
           ctx.stroke();
         }
         ctx.restore();
-        ctx.strokeStyle = 'rgba(255,90,80,0.5)';
-        ctx.lineWidth = 2;
+      }
+
+      /* ---- 通行光：随闸门滑开而亮起 ---- */
+      if (o > 0.001) {
+        const pulse = 0.5 + 0.5 * Math.sin(this.clearTime * 3.4);
+        ctx.save();
+        ctx.globalAlpha = o;
+        const grad = ctx.createLinearGradient(g.x, g.y, g.x + (horiz ? 0 : g.w), g.y + (horiz ? g.h : 0));
+        grad.addColorStop(0, 'rgba(90,255,190,0.05)');
+        grad.addColorStop(0.5, `rgba(120,255,200,${0.20 + 0.10 * pulse})`);
+        grad.addColorStop(1, 'rgba(90,255,190,0.05)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(g.x, g.y, g.w, g.h);
+        ctx.strokeStyle = `rgba(140,255,210,${0.75 * o})`;
+        ctx.lineWidth = 2.5;
         ctx.strokeRect(g.x + 1, g.y + 1, g.w - 2, g.h - 2);
+        ctx.restore();
       }
     }
 

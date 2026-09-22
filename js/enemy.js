@@ -47,6 +47,7 @@ class Enemy {
     this.dead = false;
     this.touchTimer = 0;
     this.hitFlash = 0;
+    this.hpGhost = cfg.hp;               // 血条的延迟层（表现用，缓慢追平 hp）
     this.animT = this.rng.range(0, 10);
     this.face = this.rng.range(0, TAU);
 
@@ -153,6 +154,7 @@ class Enemy {
     const spdMul = 1 + Math.min(0.022 * tier, 0.35);
     this.maxHp = Math.round(this.maxHp * hpMul);
     this.hp = this.maxHp;
+    this.hpGhost = this.maxHp;
     this.touchDamage = Math.round(this.touchDamage * dmgMul);
     this.speed *= spdMul;
     this.baseSpeed = this.speed;
@@ -219,6 +221,7 @@ class Enemy {
 
     this.maxHp = Math.round(this.maxHp * hpMul);
     this.hp = this.maxHp;
+    this.hpGhost = this.maxHp;
     this.speed *= spdMul;
     this.baseSpeed = this.speed;
 
@@ -274,6 +277,10 @@ class Enemy {
 
     if (this.hitFlash > 0) this.hitFlash = Math.max(0, this.hitFlash - dt * 4);
     if (this.touchTimer > 0) this.touchTimer -= dt;
+    /* 血条延迟层：慢慢追平真实血量（让玩家看清这一击掉了多少） */
+    if (this.hpGhost === undefined) this.hpGhost = this.hp;
+    else if (this.hpGhost > this.hp) this.hpGhost = Math.max(this.hp, this.hpGhost - dt * this.maxHp * 0.55);
+    else if (this.hpGhost < this.hp) this.hpGhost = this.hp;   // 回血时立即跟上
 
     /* 出场动画期间不行动 */
     if (!this.spawned) {
@@ -356,8 +363,9 @@ class Enemy {
     this.hp -= amount;
     this.hitFlash = 1;
 
+    /* 击退：伤害越高推得越狠，但按质量衰减（Boss 几乎推不动） */
     const ang = angleTo(srcX, srcY, this.x, this.y);
-    const kb = 150 / this.mass;
+    const kb = (95 + Math.min(amount, 70) * 2.4) / this.mass;
     this.kx += Math.cos(ang) * kb;
     this.ky += Math.sin(ang) * kb;
 
@@ -375,11 +383,9 @@ class Enemy {
   die() {
     if (this.dead) return;
     this.dead = true;
-    this.game.particles.deathBurst(this.x, this.y, this.colors, this.r / 16);
-    this.game.particles.burst(this.x, this.y, 10, {
-      speed: 120, life: 0.6, size: 5, color: '#ffffff',
-      colors: ['#ffffff', this.colors[1], this.colors[0]], drag: 2.2
-    });
+    /* 死亡演出：碎裂 + 冲击波（大体积 / Boss 额外爆一团）—— 见 juice.js */
+    if (typeof Juice !== 'undefined') Juice.death(this.game, this);
+    else this.game.particles.deathBurst(this.x, this.y, this.colors, this.r / 16);
     this.game.onEnemyKilled(this);
   }
 
@@ -442,26 +448,45 @@ class Enemy {
       ctx.restore();
     }
 
-    /* 受击白闪 */
+    /* 受击白闪：叠加式高光，命中瞬间最亮，快速衰减 */
     if (this.hitFlash > 0) {
-      ctx.globalAlpha = this.hitFlash * 0.7;
+      const hf = this.hitFlash;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = hf * 0.85;
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.arc(0, 0, this.r * 1.05, 0, TAU);
+      ctx.arc(0, 0, this.r * 1.06, 0, TAU);
       ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = hf * 0.5;
+      ctx.fillStyle = '#ffe9c0';
+      ctx.beginPath();
+      ctx.arc(0, 0, this.r * 1.22, 0, TAU);
+      ctx.fill();
+      ctx.restore();
     }
     ctx.restore();
 
-    /* 血条（受伤后才显示；Boss 走 UI 顶部大血条，这里跳过） */
-    if (this.hp < this.maxHp && !this.dead && !this.noSmallBar) {
-      const w = this.r * 2.1, h = 4;
-      const bx = this.x - w * 0.5, by = this.y - this.r - 12;
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(bx - 1, by - 1, w + 2, h + 2);
-      ctx.fillStyle = '#3a1f26';
+    /* 血条（受伤后才显示；Boss 走 UI 顶部大血条，这里跳过）
+       双层：亮色 = 刚掉的血（延迟回落），实色 = 当前血 —— 一眼看出这一击打掉了多少 */
+    if (this.hp < this.maxHp && !this.dead && !this.noSmallBar && !this.dying) {
+      const w = Math.max(26, this.r * 2.1), h = 4;
+      const bx = this.x - w * 0.5, by = this.y - this.r - 13;
+      const ratio = clamp(this.hp / this.maxHp, 0, 1);
+      const ghost = clamp((this.hpGhost === undefined ? this.hp : this.hpGhost) / this.maxHp, 0, 1);
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.72)';
+      ctx.fillRect(bx - 1.5, by - 1.5, w + 3, h + 3);
+      ctx.fillStyle = '#2a1218';
       ctx.fillRect(bx, by, w, h);
+      /* 延迟层 */
+      ctx.fillStyle = 'rgba(255,255,255,0.62)';
+      ctx.fillRect(bx, by, w * Math.max(ghost, ratio), h);
+      /* 当前血量 */
       ctx.fillStyle = this.colors[2] || '#ff6b6b';
-      ctx.fillRect(bx, by, w * clamp(this.hp / this.maxHp, 0, 1), h);
+      ctx.fillRect(bx, by, w * ratio, h);
+      ctx.restore();
     }
   }
 

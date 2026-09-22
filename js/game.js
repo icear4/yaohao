@@ -27,11 +27,19 @@ class Game {
     this.particles = new ParticleSystem(900);
     this.damageNumbers = new DamageNumbers();
     this.projectiles = [];
+    /* 投射物对象池：弹幕高峰不再频繁 new / GC */
+    this._projPool = [];
+    /* 宽阶段网格（投射物 vs 敌人） */
+    this._grid = new SpatialGrid(110);
+    this._hitBuf = [];
 
     this.state = 'title';        // title | playing | paused | gameover
     this.time = 0;
     this.kills = 0;
     this.shake = 0;
+    this.shakeDX = 0;            // 抖动方向（受击时朝背离伤害源的方向顶一下）
+    this.shakeDY = 0;
+    this.shakeKick = 0;
     this.transition = null;
     this.mouseWorld = { x: VIEW_W / 2, y: VIEW_H / 2 };
     this.nearProp = null;
@@ -141,6 +149,9 @@ class Game {
     const list = [{
       id: 'pause', x: VIEW_W - 92, y: VIEW_H - 92, w: 72, h: 72,
       label: this.state === 'paused' ? '继续' : '暂停'
+    }, {
+      id: 'build', x: 14, y: VIEW_H - 146, w: 62, h: 40,
+      label: this.ui && this.ui.buildOpen ? '收起' : '道具'
     }];
     if (this.state === 'playing' && this.nearProp && !this.nearProp.used) {
       list.push({
@@ -157,6 +168,8 @@ class Game {
       else if (this.state === 'paused') this.resume();
     } else if (id === 'act') {
       if (this.nearProp && !this.nearProp.used) this.nearProp.use();
+    } else if (id === 'build') {
+      if (this.ui) this.ui.toggleBuild();
     }
   }
 
@@ -187,7 +200,7 @@ class Game {
     this.ownedItems = [];
     this.runTime = 0;                // 本局累计时间（结算用）
     this.bossDefeated = [];          // 本局击败的 Boss 名字（结算用）
-    this.projectiles.length = 0;
+    this._clearProjectiles();
     this.fx.length = 0;
     this.zones.length = 0;
     this.particles.clear();
@@ -234,7 +247,7 @@ class Game {
     if (this.state === 'victory') return;
     this.state = 'victory';
     this.transition = null;
-    this.projectiles.length = 0;
+    this._clearProjectiles();
     this.addShake(8);
     if (typeof Meta !== 'undefined') {
       this._flushUnlocks(Meta.endRun({
@@ -262,6 +275,36 @@ class Game {
     this.state = 'playing';
     if (this.input && this.input.touch) this.input.touch.releaseAll();
     this.ui.setOverlay(null);
+  }
+
+  /* ---------------------------------------------------------
+     返回主菜单（暂停面板 / 结算面板的「返回主菜单」）
+     局中退出 = 主动放弃本局：照常结算统计与解锁，然后回到标题
+     --------------------------------------------------------- */
+  quitToTitle() {
+    const s = this.state;
+    if (s !== 'playing' && s !== 'paused' && s !== 'gameover' && s !== 'victory') return;
+
+    const inRun = (s === 'playing' || s === 'paused');
+    if (inRun && typeof Meta !== 'undefined') {
+      this._flushUnlocks(Meta.endRun({
+        victory: false, floor: this.floor, time: this.runTime, coins: this.embers
+      }));
+      Meta.addPlayTime(this.runTime);
+    }
+
+    this.state = 'title';
+    this.transition = null;
+    this._clearProjectiles();
+    this.fx.length = 0;
+    this.zones.length = 0;
+    this.particles.clear();
+    this.damageNumbers.clear();
+    this.nearProp = null;
+    this.shake = 0;
+    this.shakeKick = 0;
+    if (this.input && this.input.touch) this.input.touch.releaseAll();
+    if (this.ui) { this.ui.buildOpen = false; this.ui.setOverlay('title'); }
   }
 
   primaryAction() {
@@ -416,7 +459,7 @@ class Game {
 
     this.floor++;
     this.transition = null;
-    this.projectiles.length = 0;
+    this._clearProjectiles();
     this.fx.length = 0;
     this.zones.length = 0;
     this.particles.clear();
@@ -491,7 +534,7 @@ class Game {
     const alreadyVisited = this.map.isVisited(cell);
     this.map.current = cell;
     this.map.visit(cell);
-    this.projectiles.length = 0;
+    this._clearProjectiles();
     this.particles.clear();
     this.damageNumbers.clear();
 
@@ -548,6 +591,28 @@ class Game {
     if (tr.t >= tr.dur) this.transition = null;
   }
 
+  /* 清空投射物（归还对象池）—— 换房 / 换层 / 重开时调用 */
+  _clearProjectiles() {
+    const arr = this.projectiles;
+    const pool = this._projPool;
+    for (const p of arr) {
+      p.dead = true;
+      if (pool.length < 320) pool.push(p);
+    }
+    arr.length = 0;
+  }
+
+  /* 移除第 i 颗投射物（与末尾交换 + 归还池，避免 splice 的数组搬移） */
+  _reapProjectile(i) {
+    const arr = this.projectiles;
+    const p = arr[i];
+    const last = arr.length - 1;
+    if (i !== last) arr[i] = arr[last];
+    arr.pop();
+    p.dead = true;
+    if (this._projPool.length < 320) this._projPool.push(p);
+  }
+
   /* ---------------------------------------------------------
      投射物
      --------------------------------------------------------- */
@@ -558,7 +623,8 @@ class Game {
       for (const p of this.projectiles) if (!p.friendly && !p.isChild) hostile++;
       if (hostile >= 110) return null;
     }
-    const p = new Projectile(opt);
+    const p = this._projPool.pop() || new Projectile(opt);
+    p.reset(opt);
     this.projectiles.push(p);
     return p;
   }
@@ -750,14 +816,66 @@ class Game {
   _drawFx(ctx) {
     for (const f of this.fx) {
       const a = clamp(f.life / f.max, 0, 1);
+      if (f.type === 'ring') {
+        /* 冲击波：半径推到目标值，线宽与透明度一起收 */
+        const t = 1 - a;
+        const r = f.r1 * easeOutCubic(t);
+        ctx.save();
+        ctx.globalAlpha = a * 0.85;
+        ctx.strokeStyle = f.color;
+        ctx.lineWidth = Math.max(1, f.w * a);
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, r, 0, TAU);
+        ctx.stroke();
+        ctx.globalAlpha = a * 0.20;
+        ctx.lineWidth = Math.max(1, f.w * a * 2.2);
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, r * 0.92, 0, TAU);
+        ctx.stroke();
+        ctx.restore();
+        continue;
+      }
+      if (f.type === 'item') {
+        /* 道具浮现：从物件上方升起的一张小卡片 */
+        const t = 1 - a;
+        const rise = 46 * easeOutCubic(clamp(t * 2.4, 0, 1));
+        const pop = clamp(t * 5, 0, 1);
+        const alpha = a > 0.28 ? 1 : a / 0.28;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(f.x, f.y - 26 - rise);
+        ctx.scale(easeOutBack(pop), easeOutBack(pop));
+        const col = f.item.color || '#ffd35e';
+        const label = f.item.name || '';
+        ctx.font = '800 14px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+        const w = ctx.measureText(label).width + 34;
+        ctx.fillStyle = 'rgba(6,10,15,0.88)';
+        roundRectPath(ctx, -w / 2, -14, w, 28, 7);
+        ctx.fill();
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        /* 图标（菱形，和 HUD 色块呼应） */
+        ctx.fillStyle = col;
+        polygonPath(ctx, [[-w / 2 + 15, 0], [-w / 2 + 9, -6], [-w / 2 + 3, 0], [-w / 2 + 9, 6]]);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, -w / 2 + 22, 1);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.restore();
+        continue;
+      }
+      if (f.type === 'flash') continue;      // 闪屏在世界之外单独画
+      /* ---- zap：链式电弧 ---- */
       ctx.save();
       ctx.globalAlpha = a;
       ctx.strokeStyle = f.color;
       ctx.lineWidth = 3.5;
-      ctx.shadowColor = f.color;
-      ctx.shadowBlur = 12;
+      if (Perf.glow) { ctx.shadowColor = f.color; ctx.shadowBlur = 12; }
       ctx.beginPath();
-      /* 折线电弧 */
       const seg = 5;
       ctx.moveTo(f.x1, f.y1);
       for (let i = 1; i < seg; i++) {
@@ -768,6 +886,19 @@ class Game {
       }
       ctx.lineTo(f.x2, f.y2);
       ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  /* 全屏闪色：画在世界之上、UI 之下 */
+  _drawFlashes(ctx) {
+    for (const f of this.fx) {
+      if (f.type !== 'flash') continue;
+      const a = clamp(f.life / f.max, 0, 1);
+      ctx.save();
+      ctx.globalAlpha = f.a0 * a;
+      ctx.fillStyle = f.color;
+      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
       ctx.restore();
     }
   }
@@ -797,6 +928,16 @@ class Game {
   _updateProjectiles(dt) {
     const room = this.room;
     const player = this.player;
+    const enemies = room.enemies;
+
+    /* 宽阶段：敌人较多时先登记网格，子弹只查自己所在格子 */
+    const useGrid = enemies.length > 8;
+    if (useGrid) {
+      this._grid.clear();
+      for (let i = 0; i < enemies.length; i++) {
+        if (!enemies[i].dead) this._grid.insert(enemies[i]);
+      }
+    }
 
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
@@ -806,8 +947,8 @@ class Game {
         if (p.friendly && p.explode > 0) {
           const dmg = p.damage * (p.damageMul || 1);
           this._explode(p.x, p.y, 48 + 14 * p.explode, dmg, { color: p.color });
-        }
-        this.projectiles.splice(i, 1);
+        } else Juice.impact(this, p, p.x, p.y, 0.7);
+        this._reapProjectile(i);
         continue;
       }
 
@@ -815,10 +956,8 @@ class Game {
       if (p.friendly && !p.crackHit && room.crack && room.crack.hitTest(p.x, p.y, p.r)) {
         room.crack.onHit(p);
         if (!(p.pierce > 0 || p.orbit > 0)) {
-          this.particles.burst(p.x, p.y, 6, {
-            speed: 150, life: 0.3, size: 3, color: p.color, drag: 6
-          });
-          this.projectiles.splice(i, 1);
+          Juice.impact(this, p, p.x, p.y, 0.8);
+          this._reapProjectile(i);
           continue;
         }
       }
@@ -831,9 +970,7 @@ class Game {
         if (p.bounce > 0 || boomerang) {
           room.bounceOffHazard(p, hz);
           if (p.bounce > 0) p.bounce--;
-          this.particles.burst(p.x, p.y, 4, {
-            speed: 140, life: 0.24, size: 3, color: p.color, drag: 6
-          });
+          Juice.impact(this, p, p.x, p.y, 0.6);
           if (p.bounceHoming > 0) { p.homing = Math.max(1, p.homing); p.hitIds.length = 0; }
           if (p.endlessRefract > 0) p.pierce = Math.max(1, p.pierce);
           if (p.bounceExplode > 0 && p.explode > 0) {
@@ -841,10 +978,8 @@ class Game {
           }
           continue;
         }
-        this.particles.burst(p.x, p.y, 5, {
-          speed: 130, life: 0.26, size: 3, color: p.color, drag: 6
-        });
-        this.projectiles.splice(i, 1);
+        Juice.impact(this, p, p.x, p.y);
+        this._reapProjectile(i);
         continue;
       }
 
@@ -854,9 +989,7 @@ class Game {
         if (p.bounce > 0 || boomerang) {
           room.bounceOffWalls(p);
           if (p.bounce > 0) p.bounce--;
-          this.particles.burst(p.x, p.y, 4, {
-            speed: 140, life: 0.24, size: 3, color: p.color, drag: 6
-          });
+          Juice.impact(this, p, p.x, p.y, 0.6);
           if (p.bounceHoming > 0) { p.homing = Math.max(1, p.homing); p.hitIds.length = 0; }
           if (p.endlessRefract > 0) p.pierce = Math.max(1, p.pierce);
           if (p.bounceExplode > 0 && p.explode > 0) {
@@ -864,16 +997,15 @@ class Game {
           }
           continue;
         }
-        this.particles.burst(p.x, p.y, 5, {
-          speed: 130, life: 0.26, size: 3, color: p.color, drag: 6
-        });
-        this.projectiles.splice(i, 1);
+        Juice.impact(this, p, p.x, p.y);
+        this._reapProjectile(i);
         continue;
       }
 
       if (p.friendly) {
         let hit = null;
-        for (const e of room.enemies) {
+        const cand = useGrid ? this._grid.query(p.x, p.y, p.r, this._hitBuf) : enemies;
+        for (const e of cand) {
           if (e.dead) continue;
           if (p.hitIds.indexOf(e) >= 0) continue;
           if (Collision.circleCircle(p.x, p.y, p.r, e.x, e.y, e.r)) { hit = e; break; }
@@ -887,12 +1019,11 @@ class Game {
           hit.takeDamage(dmg, p.x, p.y);
           this._onHit(p, hit, dmg, crit);
 
+          /* ---- 命中反馈：普通命中 / 暴击各有各的火花 ---- */
+          const hang = Math.atan2(p.vy, p.vx) + Math.PI;
+          Juice.hit(this, p.x, p.y, hang, p.color, crit);
+          if (crit) Juice.critBurst(this, hit.x, hit.y);
           this.damageNumbers.add(hit.x, hit.y - hit.r - 6, dmg, { crit: crit });
-          this.particles.burst(p.x, p.y, crit ? 9 : 4, {
-            speed: 180, life: 0.3, size: 3.2,
-            color: crit ? '#ffd85e' : '#ffcf8a',
-            dir: Math.atan2(p.vy, p.vx) + Math.PI, spread: 1.7
-          });
 
           /* 穿透 / 回旋：继续飞行 */
           if (p.pierce > 0 || p.orbit > 0) {
@@ -908,17 +1039,15 @@ class Game {
           }
 
           this._bulletImpact(p, hit.x, hit.y, dmg, hit);
-          this.projectiles.splice(i, 1);
+          this._reapProjectile(i);
           continue;
         }
       } else {
         if (!player.dead && Collision.circleCircle(p.x, p.y, p.r, player.x, player.y, player.r)) {
           player.takeDamage(p.damage, p.x, p.y);
           this.ui.hitVignette = 1;
-          this.particles.burst(p.x, p.y, 6, {
-            speed: 150, life: 0.3, size: 3.4, color: '#7fe4ff', drag: 5
-          });
-          this.projectiles.splice(i, 1);
+          Juice.impact(this, p, p.x, p.y, 0.8);
+          this._reapProjectile(i);
           continue;
         }
       }
@@ -928,11 +1057,18 @@ class Game {
   /* ---------------------------------------------------------
      屏幕抖动：全局倍率 + 取大不叠加（避免多个来源叠加成剧烈晃动）
      --------------------------------------------------------- */
-  addShake(v) {
+  addShake(v, srcX, srcY) {
     if (this.shakeScale <= 0) return;
     const add = v * this.shakeScale;
     if (add <= 0.05) return;
-    this.shake = Math.min(13, Math.max(this.shake, add));
+    this.shake = Math.min(15, Math.max(this.shake, add));
+    /* 有伤害来源时，画面朝"背离来源"的方向顶一下（方向感 = 知道挨的是哪边的打） */
+    if (srcX !== undefined && this.player) {
+      const a = angleTo(srcX, srcY, this.player.x, this.player.y);
+      this.shakeDX = Math.cos(a);
+      this.shakeDY = Math.sin(a);
+      this.shakeKick = Math.min(1, (this.shakeKick || 0) + add * 0.16);
+    }
   }
 
   cycleShake() {
@@ -1013,7 +1149,8 @@ class Game {
       }
       this.particles.update(dt);
       this.damageNumbers.update(dt);
-      this.shake = Math.max(0, this.shake - dt * 62);
+      this.shake = Math.max(0, this.shake - dt * (34 + this.shake * 6));
+    this.shakeKick = Math.max(0, (this.shakeKick || 0) - dt * 3.6);
       this.input.endFrame();
       return;
     }
@@ -1024,7 +1161,8 @@ class Game {
       }
       this.particles.update(dt);
       this.damageNumbers.update(dt);
-      this.shake = Math.max(0, this.shake - dt * 62);
+      this.shake = Math.max(0, this.shake - dt * (34 + this.shake * 6));
+    this.shakeKick = Math.max(0, (this.shakeKick || 0) - dt * 3.6);
       this.input.endFrame();
       return;
     }
@@ -1039,6 +1177,7 @@ class Game {
     /* --- 游戏中 --- */
     if (this.input.wasPressed('Escape')) { this.pause(); this.input.endFrame(); return; }
     if (this.input.wasPressed('KeyR')) { this.startRun(this.ui.readSeedInput()); this.input.endFrame(); return; }
+    if (this.input.wasPressed('KeyB')) this.ui.toggleBuild();
 
     /* 摄像机滑动期间：世界照常运转，只是不再触发新的门 */
     if (this.transition) this._updateTransition(dt);
@@ -1050,7 +1189,8 @@ class Game {
     this._updateFx(dt);
     this.particles.update(dt);
     this.damageNumbers.update(dt);
-    this.shake = Math.max(0, this.shake - dt * 62);
+    this.shake = Math.max(0, this.shake - dt * (34 + this.shake * 6));
+    this.shakeKick = Math.max(0, (this.shakeKick || 0) - dt * 3.6);
 
     /* 交互物件 */
     this.nearProp = null;
@@ -1097,7 +1237,12 @@ class Game {
 
     const sh = this.shake;
     ctx.save();
-    if (sh > 0.05) ctx.translate(rand(-sh, sh), rand(-sh, sh));
+    if (sh > 0.05) {
+      /* 幅度做幂次衰减：小抖动更收敛（"轻微"），大冲击才明显 */
+      const amp = Math.pow(sh / 15, 1.3) * 15;
+      const k = (this.shakeKick || 0) * 7;
+      ctx.translate(rand(-amp, amp) + this.shakeDX * k, rand(-amp, amp) + this.shakeDY * k);
+    }
 
     if (this.transition) {
       /* 摄像机沿行进方向滑动：旧房间滑出，新房间滑入 */
@@ -1119,6 +1264,9 @@ class Game {
     }
 
     ctx.restore();
+
+    /* 全屏闪色（受伤 / 暴击 / 清怪 / Boss 陨落） */
+    this._drawFlashes(ctx);
 
     this.ui.drawBanner(ctx);
     if (this.state !== 'title') this.ui.drawHUD(ctx);
@@ -1145,15 +1293,16 @@ class Game {
       this._fpsFrames = 0;
     }
 
-    this.update(dt);
-    this.draw();
+    /* 性能自适应：只在真实主循环里采样（不影响确定性测试） */
+    Perf.sample(dt);
+    this.particles.max = Perf.budget;
 
-    const ctx = this.ctx;
-    ctx.font = '600 11px "Segoe UI", system-ui, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillStyle = 'rgba(120,150,170,0.55)';
-    ctx.fillText(`${this.fps} FPS`, VIEW_W - 26, VIEW_H - 18);
-    ctx.textAlign = 'left';
+    /* 定格：命中 / 击杀的瞬间把世界压慢几帧 */
+    const hs = HitStop.mul();
+    HitStop.update(dt);
+
+    this.update(dt * hs);
+    this.draw();
 
     requestAnimationFrame((t) => this.loop(t));
   }

@@ -174,9 +174,80 @@ class ParticleSystem {
     }
   }
 
+  /* 绘制：先按「颜色 → 透明度档」把圆形粒子分桶，再一桶一次 fill。
+     弹幕高峰时粒子数是最大的绘制开销来源，合批能把 draw call 降一到两个数量级
+     （400 颗粒子从 400 次路径填充降到几十次）。 */
   draw(ctx) {
+    const arr = this.items;
+    if (!arr.length) return;
+
+    const NL = 10;                                  // 透明度档数
+    const B = this._buckets || (this._buckets = new Map());
+    const SB = this._shapeBuf || (this._shapeBuf = []);
+
+    /* 清空上一帧的分桶（保留数组对象，避免每帧重新分配） */
+    for (const g of B.values()) {
+      for (let k = 0; k < NL; k++) g[k].length = 0;
+    }
+    SB.length = 0;
+
+    /* 一遍扫描完成分桶 */
+    for (let i = 0; i < arr.length; i++) {
+      const p = arr[i];
+      const a = clamp(p.life / p.maxLife, 0, 1);
+      if (a < 0.05) continue;
+      if (p.shape !== 'circle') { SB.push(p); continue; }
+      let g = B.get(p.color);
+      if (!g) { g = []; for (let k = 0; k < NL; k++) g.push([]); B.set(p.color, g); }
+      g[Math.round(a * (NL - 1))].push(p);
+    }
+
     ctx.save();
-    for (let i = 0; i < this.items.length; i++) this.items[i].draw(ctx);
+
+    /* 圆形：一桶一条路径 */
+    for (const g of B.values()) {
+      for (let k = 0; k < NL; k++) {
+        const list = g[k];
+        if (!list.length) continue;
+        ctx.globalAlpha = k / (NL - 1);
+        ctx.fillStyle = list[0].color;
+        ctx.beginPath();
+        for (let i = 0; i < list.length; i++) {
+          const p = list[i];
+          const t = p.life / p.maxLife;
+          const s = p.shrink ? p.size * (0.25 + t * 0.75) : p.size;
+          ctx.moveTo(p.x + s * 0.5, p.y);
+          ctx.arc(p.x, p.y, s * 0.5, 0, TAU);
+        }
+        ctx.fill();
+      }
+    }
+
+    /* 方形 / 碎片：需要各自旋转，逐个画（数量通常远少于圆形） */
+    for (let i = 0; i < SB.length; i++) {
+      const p = SB[i];
+      const t = p.life / p.maxLife;
+      const a = clamp(t, 0, 1);
+      const s = p.shrink ? p.size * (0.25 + t * 0.75) : p.size;
+      ctx.globalAlpha = a;
+      ctx.fillStyle = p.color;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      if (p.shape === 'square') {
+        ctx.fillRect(-s * 0.5, -s * 0.5, s, s);
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(0, -s);
+        ctx.lineTo(s * 0.55, s * 0.7);
+        ctx.lineTo(-s * 0.55, s * 0.7);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    ctx.globalAlpha = 1;
     ctx.restore();
   }
 

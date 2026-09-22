@@ -70,6 +70,7 @@ class Chest extends Prop {
     this.item = pickItem(rng, build, { synergy: true, early: (build ? build.length : 0) < 2 });
     this.label = '开启宝箱';
     this.openT = 0;
+    this.burstT = 0;          // 开箱演出计时（0 表示未触发）
   }
 
   use() {
@@ -78,28 +79,56 @@ class Chest extends Prop {
     const got = p.gainItem(this.item.id);
     if (!got) return false;                 // 已达堆叠上限
     this.game.ui.showBanner(got.name, got.desc, 2.6);
-    this.game.damageNumbers.add(this.x, this.y - 30, this.item.name, {
-      color: this.item.color, life: 1.3, vy: -40
-    });
-    this.game.particles.burst(this.x, this.y, 24, {
-      speed: 200, life: 0.8, size: 5,
+
+    /* ---- 开箱演出：箱盖弹开 → 光柱冲起 → 道具卡浮现 ---- */
+    this.burstT = 0.0001;
+    this.game.particles.burst(this.x, this.y - 6, 26, {
+      speed: 220, life: 0.8, size: 5,
       colors: [this.item.color, '#ffffff', '#ffd35e']
     });
-    this.game.particles.ring(this.x, this.y, this.item.color, 18, 180);
+    this.game.particles.ring(this.x, this.y, this.item.color, 20, 200);
+    this.game.addShake(2.4);
+    if (typeof Juice !== 'undefined') {
+      Juice.itemPop(this.game, this.x, this.y - 16, { name: got.name, color: got.color });
+      Juice.flash(this.game, '#ffe08a', 0.10, 0.16);
+      Juice.ring(this.game, this.x, this.y, this.item.color, 120, 0.4, 3);
+    }
     return true;
   }
 
   update(dt) {
     super.update(dt);
-    if (this.used && this.openT < 1) this.openT = Math.min(1, this.openT + dt * 3);
+    if (this.used && this.openT < 1) this.openT = Math.min(1, this.openT + dt * 2.4);
+    if (this.used) this.burstT += dt;
   }
 
   draw(ctx) {
     const t = this.animT;
-    const open = this.openT;
+    /* 箱盖用回弹缓动：先猛地弹开，再落回一点 */
+    const open = easeOutBack(clamp(this.openT, 0, 1));
     const col = this.used ? '#5d6f7e' : this.item.color;
     this.drawBase(ctx, col, 0.35);
     if (!this.used) this.drawMarker(ctx, col);
+
+    /* 开箱瞬间冲起的光柱 */
+    if (this.used && this.burstT < 0.9) {
+      const a = (1 - this.burstT / 0.9);
+      ctx.save();
+      ctx.globalAlpha = a * 0.55;
+      const g = ctx.createLinearGradient(this.x, this.y - 10, this.x, this.y - 190);
+      g.addColorStop(0, this.item.color);
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = g;
+      const w = 16 + 26 * (1 - a);
+      ctx.beginPath();
+      ctx.moveTo(this.x - w * 0.35, this.y - 6);
+      ctx.lineTo(this.x + w * 0.35, this.y - 6);
+      ctx.lineTo(this.x + w, this.y - 190);
+      ctx.lineTo(this.x - w, this.y - 190);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
 
     ctx.save();
     ctx.translate(this.x, this.y);
@@ -114,10 +143,10 @@ class Chest extends Prop {
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    /* 箱盖（开启时抬起） */
+    /* 箱盖（开启时抬起并翻转，带轻微过冲） */
     ctx.save();
-    ctx.translate(0, -10 - open * 12);
-    ctx.rotate(-open * 0.7);
+    ctx.translate(0, -10 - open * 16);
+    ctx.rotate(-open * 0.95);
     ctx.fillStyle = '#4a3520';
     roundRectPath(ctx, -21, -14, 42, 16, 6);
     ctx.fill();
@@ -168,15 +197,17 @@ class BossRelic extends Prop {
     const got = p.gainItem(this.item.id);
     if (!got) return false;
     this.game.ui.showBanner('遗物 · ' + got.name, got.desc, 3.2);
-    this.game.damageNumbers.add(this.x, this.y - 32, this.item.name, {
-      color: this.item.color, life: 1.5, vy: -42
-    });
     this.game.particles.burst(this.x, this.y, 34, {
       speed: 240, life: 0.9, size: 6,
       colors: [this.item.color, '#ffffff', '#ffd35e']
     });
     this.game.particles.ring(this.x, this.y, this.item.color, 24, 220);
     this.game.addShake(3);
+    if (typeof Juice !== 'undefined') {
+      Juice.itemPop(this.game, this.x, this.y - 20, { name: got.name, color: got.color });
+      Juice.ring(this.game, this.x, this.y, this.item.color, 190, 0.55, 4);
+      Juice.flash(this.game, this.item.color, 0.14, 0.2);
+    }
     return true;
   }
 
