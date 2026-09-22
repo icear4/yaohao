@@ -553,6 +553,36 @@ function pickItem(rng, build, opt) {
   return rng.pick(pool);
 }
 
+/* Boss 奖励：随机一件强力道具
+   —— 强力 = 稀有度高（max 小）+ 带机制（flags），且不与已堆满的重复 */
+function pickStrongItem(rng, build) {
+  const owned = build || { count: () => 0 };
+  const avail = it => owned.count(it.id) < (it.max || 99);
+  let pool = ITEMS.filter(it => avail(it) &&
+    (it.cat === 'attack' || it.cat === 'proj' || it.cat === 'special'));
+  if (pool.length > 2) {
+    const rare = pool.filter(it => (it.max || 99) <= 3);
+    if (rare.length) pool = rare;
+  }
+  if (!pool.length) pool = ITEMS.filter(avail);
+  if (!pool.length) pool = ITEMS.slice();
+  /* 偏向玩家已有方向，帮助成型（但仍受强力池限制） */
+  if (rng.chance(0.4) && build && build.slots) {
+    const cats = {};
+    for (const s of build.slots) {
+      const it = ITEM_BY_ID[s.id];
+      if (it) cats[it.cat] = (cats[it.cat] || 0) + s.n;
+    }
+    let best = null, bestN = 0;
+    for (const k in cats) if (cats[k] > bestN) { bestN = cats[k]; best = k; }
+    if (best) {
+      const same = pool.filter(it => it.cat === best);
+      if (same.length) pool = same;
+    }
+  }
+  return rng.pick(pool);
+}
+
 /* HUD 属性摘要 */
 function playerStatsText(p) {
   return `伤害 ${p.damage.toFixed(0)} · 射速 ${(1 / p.fireInterval).toFixed(1)}/s · 弹数 ${p.bulletCount}` +

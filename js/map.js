@@ -25,7 +25,7 @@ const ROOM_META = {
   elite:    { cn: '精英',   color: '#ff8a5c', glyph: 'E' },
   shop:     { cn: '商栈',   color: '#7fe4ff', glyph: '$' },
   event:    { cn: '异象',   color: '#c08bff', glyph: '?' },
-  boss:     { cn: '守望者', color: '#ff4d6b', glyph: 'B' },
+  boss:     { cn: '首领',   color: '#ff4d6b', glyph: 'B' },
   secret:   { cn: '秘室',   color: '#c08bff', glyph: '*' }
 };
 
@@ -57,8 +57,11 @@ class GameMap {
      --------------------------------------------------------- */
   generate() {
     const rng = this.rng;
-    this.cols = clamp(5 + Math.floor(this.floor / 3), 5, 7);
-    this.rows = 5;
+    /* 章节决定地图规模（每层的主场尺寸不同） */
+    const ch = ChapterOf(this.floor);
+    const sz = ch.size || { cols: 5, rows: 5 };
+    this.cols = clamp(sz.cols, 5, 7);
+    this.rows = clamp(sz.rows, 5, 6);
     const cols = this.cols, rows = this.rows;
 
     /* 1. 起点固定在最左列（纵向居中附近） */

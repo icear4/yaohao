@@ -9,6 +9,9 @@ class UI {
     this.banner = null;
     this.hintTimer = 9;
     this.hitVignette = 0;
+    this.animT = 0;
+    this.customHint = '';          // 章节环境提示（进入新层时短暂显示）
+    this.customHintT = 0;
 
     this.overlay = document.getElementById('overlay');
     this.elKicker = document.getElementById('ov-kicker');
@@ -66,7 +69,9 @@ class UI {
       this.elText.innerHTML =
         '星脉崩解之后，回廊在裂隙中生长。<br>' +
         '徘徊其中的，是回声凝成的残形。<br><br>' +
-        '你是最后的拾火者，收集余烬，走到守望者面前。';
+        '你是最后的拾火者。穿过 <b>五层回廊</b>，击败每一层的守望者，<br>' +
+        '直到星界核心停止搏动。<br><br>' +
+        '<span style="color:#8fa3b5">废弃庭院 → 机械矿井 → 腐化森林 → 虚空遗迹 → 星界核心</span>';
       this.elBtn.textContent = '开始探索';
       const kbHint = 'WASD 移动 · 鼠标瞄准 · 左键射击 · E 交互 · ESC 暂停 · F 全屏';
       this.elHint.textContent = (this.game.touchMode && this.touchHint) ? this.touchHint : kbHint;
@@ -77,7 +82,7 @@ class UI {
       this.elTitleEn.textContent = 'PAUSED';
       this.elText.innerHTML =
         `SEED　<b>${g.seed}</b><br>` +
-        `层数　<b>第 ${g.floor} 层</b><br>` +
+        `层数　<b>第 ${g.floor} 层 · ${this.chapterName(g)}</b><br>` +
         `金币　<b>${g.coins}</b><br>` +
         `已探索　<b>${Object.keys(g.map ? g.map.visited : {}).length} / ${g.map ? g.map.cells.length : 0}</b> 间<br>` +
         `持有道具　<b>${g.player ? g.player.build.length : 0}</b> 件<br>` +
@@ -85,13 +90,29 @@ class UI {
       this.elBtn.textContent = '继续';
       this.elHint.textContent = 'R 重新开始 · ESC 继续';
       if (this.elSeed) this.elSeed.style.display = 'none';
+    } else if (mode === 'victory') {
+      const bosses = (g.bossDefeated && g.bossDefeated.length)
+        ? g.bossDefeated.join(' → ') : '—';
+      this.elKicker.textContent = 'THE RIFT FALLS SILENT';
+      this.elTitleCn.textContent = '回廊终结';
+      this.elTitleEn.textContent = 'RUN COMPLETE';
+      this.elText.innerHTML =
+        `SEED　<b>${g.seed}</b><br>` +
+        `路线　<b>${this.chapterRoute(g)}</b><br>` +
+        `击败首领　<b>${bosses}</b><br>` +
+        `击碎残形　<b>${g.kills}</b>　用时　<b>${this.fmtTime(g.runTime)}</b>　金币　<b>${g.coins}</b><br>` +
+        `持有道具　<b>${g.player ? g.player.build.length : 0}</b> 件<br>` +
+        `<span style="color:#8fa3b5">${this.buildSummary(g)}</span>`;
+      this.elBtn.textContent = '再来一局';
+      this.elHint.textContent = '按 R 也可以重来（可先改 Seed）';
+      if (this.elSeed) this.elSeed.style.display = '';
     } else if (mode === 'gameover') {
       this.elKicker.textContent = 'EMBER EXTINGUISHED';
       this.elTitleCn.textContent = '火种熄灭';
       this.elTitleEn.textContent = 'RUN OVER';
       this.elText.innerHTML =
         `SEED　<b>${g.seed}</b><br>` +
-        `抵达　<b>第 ${g.floor} 层 · ${g.roomTypeName()}</b><br>` +
+        `抵达　<b>第 ${g.floor} 层 · ${this.chapterName(g)} · ${g.roomTypeName()}</b><br>` +
         `击碎残形　<b>${g.kills}</b>　射出弹丸　<b>${g.player ? g.player.shotsFired : 0}</b><br>` +
         `持有道具　<b>${g.player ? g.player.build.length : 0}</b> 件<br>` +
         `<span style="color:#8fa3b5">${this.buildSummary(g)}</span>`;
@@ -107,9 +128,39 @@ class UI {
     return (this.elSeed.value || '').trim().toUpperCase();
   }
 
+  /* 当前章节名（如「机械矿井」） */
+  chapterName(g) {
+    const ch = ChapterOf(g ? g.floor : 1);
+    return ch ? ch.cn : '';
+  }
+
+  /* 结算用：完整路线（第1层 废弃庭院 → …… → 第5层 星界核心） */
+  chapterRoute(g) {
+    const out = [];
+    for (const ch of CHAPTERS) {
+      const reached = (g && g.floor >= ch.id);
+      out.push((reached ? '' : '<span style="opacity:0.4">') +
+        `${ch.id}·${ch.cn}` + (reached ? '' : '</span>'));
+    }
+    return out.join(' → ');
+  }
+
+  /* 秒 → mm:ss */
+  fmtTime(sec) {
+    const s = Math.max(0, Math.round(sec || 0));
+    const m = Math.floor(s / 60);
+    return `${m}:${String(s % 60).padStart(2, '0')}`;
+  }
+
   /* ---------------------------------------------------------
      横幅
      --------------------------------------------------------- */
+  /* 章节环境提示（进入新层时短暂显示） */
+  showHint(text, dur) {
+    this.customHint = text || '';
+    this.customHintT = dur || 5;
+  }
+
   showBanner(text, sub, duration) {
     if (!text) return;
     this.banner = {
@@ -126,7 +177,12 @@ class UI {
   }
 
   update(dt) {
+    this.animT += dt;
     if (this.hintTimer > 0) this.hintTimer -= dt;
+    if (this.customHintT > 0) {
+      this.customHintT -= dt;
+      if (this.customHintT <= 0) this.customHint = '';
+    }
     if (this.hitVignette > 0) this.hitVignette = Math.max(0, this.hitVignette - dt * 1.6);
     if (this.banner) {
       this.banner.life -= dt;
@@ -206,17 +262,34 @@ class UI {
       ? (g.room.state === 'clear' ? '已肃清 · 门已开启' : `残形剩余 ${alive}`)
       : '可自由通行';
     ctx.fillStyle = (g.room && g.room.isCombatRoom && g.room.state !== 'clear') ? '#ff9d6b' : '#7dffb0';
-    ctx.fillText(`第 ${g.floor} 层 · ${roomName} · ${statusTxt}`, bx + 88, by + 40);
+    const chCn = this.chapterName(g);
+    ctx.fillText(`第 ${g.floor} 层 · ${chCn} · ${roomName} · ${statusTxt}`, bx + 88, by + 40);
 
     ctx.fillStyle = '#5d6f7e';
     ctx.font = '600 11px "Segoe UI", system-ui, sans-serif';
     ctx.fillText(`SEED ${g.seed}　击碎 ${g.kills}　${playerStatsText(p)}`, bx, by + 58);
+
+    /* 章节进度：五章小圆点（当前章节点亮） */
+    const dotY = by + 74;
+    let dotX = bx + 168;
+    for (const ch of CHAPTERS) {
+      const cur = (ch.id === g.floor);
+      const done = (ch.id < g.floor);
+      ctx.fillStyle = cur ? ch.pal.accent : (done ? 'rgba(160,190,210,0.55)' : 'rgba(120,150,170,0.22)');
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, cur ? 4.5 : 3, 0, TAU);
+      ctx.fill();
+      dotX += 15;
+    }
 
     /* ---- 增益 / 诅咒条 ---- */
     this.drawBuffs(ctx, bx, by + 76);
 
     /* ---- 右上：小地图 ---- */
     this.drawMinimap(ctx);
+
+    /* ---- 顶部中央：Boss 血条 + 阶段 + 攻击预警 ---- */
+    this.drawBossBar(ctx);
 
     /* ---- 左下：Build 面板（持有道具 + 组合） ---- */
     this.drawBuildPanel(ctx);
@@ -238,18 +311,28 @@ class UI {
       ctx.textAlign = 'left';
     }
 
-    /* ---- 底部操作提示（渐隐） ---- */
-    if (this.hintTimer > 0) {
-      ctx.globalAlpha = clamp(this.hintTimer / 2.5, 0, 1);
-      ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
-      ctx.fillStyle = '#6d8296';
-      ctx.textAlign = 'center';
-      const hint = g.touchMode
-        ? '拖动屏幕两侧即可移动与射击'
-        : 'WASD 移动　·　鼠标瞄准　·　左键射击　·　E 交互　·　ESC 暂停　·　F 全屏';
-      ctx.fillText(hint, VIEW_W / 2, VIEW_H - 22);
-      ctx.textAlign = 'left';
-      ctx.globalAlpha = 1;
+    /* ---- 底部操作提示 / 章节环境提示（渐隐） ---- */
+    if (this.hintTimer > 0 || this.customHintT > 0) {
+      if (this.customHintT > 0) {
+        ctx.globalAlpha = clamp(this.customHintT / 2.0, 0, 1);
+        ctx.font = '700 13px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+        ctx.fillStyle = ChapterOf(g.floor).pal.accent;
+        ctx.textAlign = 'center';
+        ctx.fillText(this.customHint, VIEW_W / 2, VIEW_H - 22);
+        ctx.textAlign = 'left';
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.globalAlpha = clamp(this.hintTimer / 2.5, 0, 1);
+        ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
+        ctx.fillStyle = '#6d8296';
+        ctx.textAlign = 'center';
+        const hint = g.touchMode
+          ? '拖动屏幕两侧即可移动与射击'
+          : 'WASD 移动　·　鼠标瞄准　·　左键射击　·　E 交互　·　ESC 暂停　·　F 全屏';
+        ctx.fillText(hint, VIEW_W / 2, VIEW_H - 22);
+        ctx.textAlign = 'left';
+        ctx.globalAlpha = 1;
+      }
     }
 
     /* ---- 受击暗角 / 低血量 ---- */
@@ -277,6 +360,117 @@ class UI {
   /* ---------------------------------------------------------
      Build 面板：当前持有的道具（左下角）
      鼠标悬停任意道具 → 显示完整说明
+     --------------------------------------------------------- */
+  /* ---------------------------------------------------------
+     Boss 血条：名称 / 阶段 / HP / 阶段阈值刻度 / 攻击预警
+     —— Boss 战的关键可读性：当前在打什么、处在第几阶段、下一招是什么
+     --------------------------------------------------------- */
+  drawBossBar(ctx) {
+    const g = this.game;
+    if (!g || !g.room) return;
+    let boss = null;
+    for (const e of g.room.enemies) {
+      if (e.isBoss && !e.dead) { boss = e; break; }
+    }
+    if (!boss) return;
+
+    const cx = VIEW_W / 2;
+    const bw = 660, bh = 16;
+    const bx = cx - bw / 2, by = 30;
+    const ratio = clamp(boss.hp / boss.maxHp, 0, 1);
+    const col = boss.colors[1] || '#ff4d6b';
+    const sub = boss.colors[2] || '#ffffff';
+
+    /* 背板 */
+    ctx.fillStyle = 'rgba(6,10,15,0.78)';
+    roundRectPath(ctx, bx - 12, by - 24, bw + 24, bh + 50, 8);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,120,140,0.22)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    /* 名称 + 阶段 */
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.font = '800 14px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+    ctx.fillStyle = col;
+    ctx.fillText(boss.name || '守望者', bx, by - 8);
+
+    ctx.font = '700 11px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+    ctx.fillStyle = sub;
+    const pname = boss.phaseNames ? boss.phaseNames[boss.phase - 1] : '';
+    ctx.fillText(`第 ${boss.phase} 阶段 · ${pname}`, bx + ctx.measureText(boss.name || '守望者').width + 90, by - 8);
+
+    /* 阶段点 */
+    for (let i = 0; i < 3; i++) {
+      const px = bx + bw - 12 - (2 - i) * 16;
+      const on = i < boss.phase;
+      ctx.fillStyle = on ? col : 'rgba(255,255,255,0.16)';
+      ctx.beginPath();
+      ctx.arc(px, by - 12, 4.5, 0, TAU);
+      ctx.fill();
+    }
+
+    /* 血条 */
+    ctx.fillStyle = '#241018';
+    roundRectPath(ctx, bx, by, bw, bh, 5);
+    ctx.fill();
+
+    const grad = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+    grad.addColorStop(0, boss.colors[0] || '#4a2b52');
+    grad.addColorStop(0.35, col);
+    grad.addColorStop(1, sub);
+    ctx.fillStyle = grad;
+    if (ratio > 0.001) {
+      roundRectPath(ctx, bx, by, bw * ratio, bh, 5);
+      ctx.fill();
+    }
+
+    /* 阶段阈值刻度（70% / 40%）：让玩家知道什么时候会变招 */
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 2;
+    for (const gate of [0.70, 0.40]) {
+      const gx = bx + bw * gate;
+      ctx.beginPath();
+      ctx.moveTo(gx, by - 2);
+      ctx.lineTo(gx, by + bh + 2);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+    ctx.lineWidth = 1;
+    roundRectPath(ctx, bx + 0.5, by + 0.5, bw - 1, bh - 1, 5);
+    ctx.stroke();
+
+    ctx.textAlign = 'right';
+    ctx.font = '800 12px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = '#ffe9c0';
+    ctx.fillText(`${Math.ceil(boss.hp)} / ${boss.maxHp}`, bx + bw - 66, by + 13);
+    ctx.textAlign = 'left';
+
+    /* 攻击预警：当前招式名 / 阶段转换提示 */
+    let warn = null;
+    if (boss.phaseLock > 0) warn = '阶段转换 · 攻击更快，弹幕更密';
+    else if (boss.dying) warn = '陨落中';
+    else if (boss.telegraphText) warn = boss.telegraphText;
+
+    ctx.textAlign = 'center';
+    if (warn) {
+      const pulse = 0.72 + 0.28 * Math.sin(this.animT * 9);
+      ctx.globalAlpha = boss.dying ? 0.8 : pulse;
+      ctx.font = '800 15px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      ctx.fillStyle = boss.dying ? '#ffd35e' : '#ff9d6b';
+      ctx.fillText('▲ ' + warn, cx, by + bh + 18);
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.font = '600 11px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      ctx.fillStyle = '#6d8296';
+      ctx.fillText('特殊技能：' + (boss.specialName || '-'), cx, by + bh + 18);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  /* ---------------------------------------------------------
+     Build 面板（左下）
      --------------------------------------------------------- */
   drawBuildPanel(ctx) {
     const g = this.game;

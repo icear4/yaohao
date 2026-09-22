@@ -177,6 +177,8 @@ class Game {
     this.kills = 0;
     this.embers = 0;
     this.ownedItems = [];
+    this.runTime = 0;                // 本局累计时间（结算用）
+    this.bossDefeated = [];          // 本局击败的 Boss 名字（结算用）
     this.projectiles.length = 0;
     this.fx.length = 0;
     this.zones.length = 0;
@@ -197,8 +199,27 @@ class Game {
     this.map.visit(this.map.start);
     this._placePlayerAtEntry('bottom');
 
-    this.ui.showBanner('第 1 层 · ' + this.map.cells.length + ' 间',
-      'SEED ' + this.seed + ' · 走到守望者面前', 2.4);
+    const ch1 = ChapterOf(1);
+    this.ui.showBanner('第 1 层 · ' + ch1.cn,
+      ch1.sub, 4.0);
+    this.ui.showHint(ch1.tip, 6);
+  }
+
+  /* ---------------------------------------------------------
+     通关：走完第 5 层（击败最终 Boss）→ 结算
+     --------------------------------------------------------- */
+  finishRun() {
+    if (this.state === 'victory') return;
+    this.state = 'victory';
+    this.transition = null;
+    this.projectiles.length = 0;
+    this.addShake(8);
+    this.particles.burst(VIEW_W / 2, VIEW_H / 2, 60, {
+      speed: 320, life: 1.4, size: 6,
+      colors: ['#8fe9ff', '#ffffff', '#ffd35e', '#c08bff']
+    });
+    this.particles.ring(VIEW_W / 2, VIEW_H / 2, '#8fe9ff', 40, 380);
+    this.ui.setOverlay('victory');
   }
 
   pause() {
@@ -216,8 +237,9 @@ class Game {
   }
 
   primaryAction() {
-    if (this.state === 'title' || this.state === 'gameover') this.startRun(this.ui.readSeedInput());
-    else if (this.state === 'paused') this.resume();
+    if (this.state === 'title' || this.state === 'gameover' || this.state === 'victory') {
+      this.startRun(this.ui.readSeedInput());
+    } else if (this.state === 'paused') this.resume();
   }
 
   roomTypeName() { return this.room ? this.room.meta.cn : '-'; }
@@ -296,9 +318,11 @@ class Game {
     else if (e.type === 'shooter') drop += 1;
     /* 种类定义的额外金币（注册表里 coin 字段） */
     if (e.coinBonus) drop += e.coinBonus;
-    if (e.isBoss) drop = 90 + this.floor * 20;
+    if (e.isBoss) drop = 150 + this.floor * 30;
     if (this.room && this.room.type === ROOM_TYPE.ELITE) drop = Math.round(drop * 1.5);
     if (e.affix && e.affix.indexOf('rich') >= 0) drop *= 3;
+    /* 章节金币系数（越深越值钱） */
+    drop = Math.round(drop * (ChapterOf(this.floor).coins || 1));
     this.embers += drop;
     this.damageNumbers.add(e.x, e.y - 14, '◈' + drop, { color: '#ffd35e', life: 0.9, vy: -46 });
 
@@ -326,8 +350,15 @@ class Game {
 
   onRoomCleared(room) {
     if (room.type === ROOM_TYPE.BOSS) {
-      this.ui.showClearBanner('守望者已陨落 · 触碰裂隙进入下一层');
-      this.player.heal(35);
+      const bname = BossRoster.nameOf(room.bossId || 'boss');
+      if (this.bossDefeated.indexOf(bname) < 0) this.bossDefeated.push(bname);
+      const ch = ChapterOf(this.floor);
+      const last = (this.floor >= CHAPTER_COUNT);
+      const sub = last
+        ? '拾取遗物 · 触碰裂隙终结回廊'
+        : '拾取遗物 · 进入第 ' + (this.floor + 1) + ' 层 · ' + ChapterOf(this.floor + 1).cn;
+      this.ui.showClearBanner(bname + ' 已陨落 · ' + sub);
+      this.player.heal(45);
       this.addShake(6);
     } else if (room.isCombatRoom) {
       this.ui.showClearBanner();
@@ -336,6 +367,9 @@ class Game {
   }
 
   nextFloor() {
+    /* 已经打完最终层 → 结算，不再生成下一层 */
+    if (this.floor >= CHAPTER_COUNT) { this.finishRun(); return; }
+
     this.floor++;
     this.transition = null;
     this.projectiles.length = 0;
@@ -350,8 +384,11 @@ class Game {
     this.map.visit(this.map.start);
     this._placePlayerAtEntry('bottom');
     this.player.heal(20);
-    this.ui.showBanner('第 ' + this.floor + ' 层',
-      '回廊重新排列 · ' + this.map.cells.length + ' 间', 2.4);
+
+    const ch = ChapterOf(this.floor);
+    this.ui.showBanner('第 ' + this.floor + ' 层 · ' + ch.cn,
+      ch.sub + '　·　' + this.map.cells.length + ' 间', 3.4);
+    this.ui.showHint(ch.tip, 6);
   }
 
   /* ---------------------------------------------------------
@@ -421,7 +458,7 @@ class Game {
     let sub;
     if (alreadyVisited) {
       if (cell.type === ROOM_TYPE.BOSS && this.room.state === 'clear') {
-        sub = '守望者已陨落 · 触碰裂隙进入下一层';
+        sub = BossRoster.nameOf(this.room.bossId || 'boss') + ' 已陨落 · 触碰裂隙继续前行';
       } else if (this.room.isCombatRoom && this.room.state !== 'clear') {
         sub = '返回之前的房间 · 战斗继续';
       } else if (cell.type === ROOM_TYPE.TREASURE || cell.type === ROOM_TYPE.SHOP ||
@@ -430,8 +467,9 @@ class Game {
       } else {
         sub = '已探索 · 房间保持清空状态';
       }
-    } else if (cell.type === ROOM_TYPE.BOSS) sub = '守望者就在前方';
-    else if (cell.type === ROOM_TYPE.SECRET) sub = '秘室 · 无人看守的丰厚奖励';
+    } else if (cell.type === ROOM_TYPE.BOSS) {
+      sub = BossRoster.nameOf(this.room.bossId || 'boss') + ' 就在前方';
+    } else if (cell.type === ROOM_TYPE.SECRET) sub = '秘室 · 无人看守的丰厚奖励';
     else if (cell.type === ROOM_TYPE.TREASURE) sub = '按 E 开启宝箱';
     else if (cell.type === ROOM_TYPE.SHOP) sub = '按 E 购买强化';
     else if (cell.type === ROOM_TYPE.EVENT) sub = '按 E 触碰异象';
@@ -739,6 +777,31 @@ class Game {
         }
       }
 
+      /* 环境障碍（石柱 / 齿轮 / 相位柱 / 电弧塔）：挡子弹，可破坏物在此扣血 */
+      const hz = room.hazardAt(p.x, p.y, p.r);
+      if (hz) {
+        if (p.friendly) hz.onBullet(p);
+        const boomerang = p.orbit > 0;
+        if (p.bounce > 0 || boomerang) {
+          room.bounceOffHazard(p, hz);
+          if (p.bounce > 0) p.bounce--;
+          this.particles.burst(p.x, p.y, 4, {
+            speed: 140, life: 0.24, size: 3, color: p.color, drag: 6
+          });
+          if (p.bounceHoming > 0) { p.homing = Math.max(1, p.homing); p.hitIds.length = 0; }
+          if (p.endlessRefract > 0) p.pierce = Math.max(1, p.pierce);
+          if (p.bounceExplode > 0 && p.explode > 0) {
+            this._explode(p.x, p.y, 42 + 14 * p.explode, p.damage * (p.damageMul || 1), { color: p.color });
+          }
+          continue;
+        }
+        this.particles.burst(p.x, p.y, 5, {
+          speed: 130, life: 0.26, size: 3, color: p.color, drag: 6
+        });
+        this.projectiles.splice(i, 1);
+        continue;
+      }
+
       /* 撞墙：反弹或消散 */
       if (room.hitsWall(p.x, p.y, p.r)) {
         const boomerang = p.orbit > 0;      // 回旋弹永远不会被墙吃掉
@@ -901,6 +964,17 @@ class Game {
       return;
     }
 
+    if (this.state === 'victory') {
+      if (this.input.wasPressed('KeyR') || this.input.wasPressed('Enter')) {
+        this.startRun(this.ui.readSeedInput());
+      }
+      this.particles.update(dt);
+      this.damageNumbers.update(dt);
+      this.shake = Math.max(0, this.shake - dt * 62);
+      this.input.endFrame();
+      return;
+    }
+
     if (this.state === 'paused') {
       if (this.input.wasPressed('Escape') || this.input.wasPressed('Enter')) this.resume();
       if (this.input.wasPressed('KeyR')) this.startRun(this.ui.readSeedInput());
@@ -915,6 +989,7 @@ class Game {
     /* 摄像机滑动期间：世界照常运转，只是不再触发新的门 */
     if (this.transition) this._updateTransition(dt);
 
+    this.runTime += dt;
     this.player.update(dt, this.input);
     this.room.update(dt);
     this._updateProjectiles(dt);
@@ -956,6 +1031,7 @@ class Game {
       this.particles.draw(ctx);
       this.damageNumbers.draw(ctx);
     }
+    room.drawOverLayer(ctx);        // 环境柱体 / 章节氛围（在实体之上）
     room.drawWalls(ctx);
   }
 

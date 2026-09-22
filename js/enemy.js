@@ -73,6 +73,8 @@ class Enemy {
     /* ---- 需要随层数成长的自定义伤害字段（子类填名字） ---- */
     this.dmgFields = null;
     this.coinBonus = 0;              // 额外金币（由种类定义写入）
+    this.spreadFire = 0;             // 附加弹数量（由章节弹幕复杂度写入）
+    this._spreadCd = 0;
   }
 
   /* 精英词缀表（数据驱动） */
@@ -170,7 +172,7 @@ class Enemy {
   /* 统一的敌方弹幕生成入口：所有敌人子弹都从这里出，便于统一做安全限制 */
   fireBullet(angle, opt) {
     opt = opt || {};
-    return this.game.spawnProjectile({
+    const main = this.game.spawnProjectile({
       x: this.x + Math.cos(angle) * (this.r + (opt.offset || 6)),
       y: this.y + Math.sin(angle) * (this.r + (opt.offset || 6)),
       angle: angle,
@@ -185,6 +187,65 @@ class Enemy {
       homing: opt.homing || 0,
       game: this.game
     });
+
+    /* 章节弹幕复杂度：主弹附带扇形附加弹
+       带节流（≤0.14s 一次），所以环形 / 扇形大招不会被成倍放大到无法躲避 */
+    if (this.spreadFire > 0 && !opt.isExtra) {
+      this._spreadCd = this._spreadCd || 0;
+      if (this._spreadCd <= 0) {
+        this._spreadCd = 0.14;
+        for (let i = 1; i <= this.spreadFire; i++) {
+          const side = (i % 2 === 0) ? 1 : -1;
+          const a = angle + side * 0.26 * Math.ceil(i / 2);
+          const extra = Object.assign({}, opt, { isExtra: true, damage: (opt.damage === undefined ? 8 : opt.damage) * 0.7 });
+          this.fireBullet(a, extra);
+        }
+      }
+    }
+    return main;
+  }
+
+  /* 章节难度缩放（五章各自一套节奏）
+     不靠单纯堆 HP：HP 缓慢成长，攻击节奏 / 移速 / 弹幕复杂度 / 词缀渗透同步上升。
+     Boss 只吃一半的成长幅度（它本身靠阶段变化变强）。 */
+  applyChapterScale(ch) {
+    if (!ch || !ch.scale) return;
+    const s = ch.scale;
+    const boss = !!this.isBoss;
+
+    const hpMul = 1 + ((s.hp || 1) - 1) * (boss ? 0.5 : 1);
+    const rateMul = 1 + ((s.rate || 1) - 1) * (boss ? 0.6 : 1);
+    const spdMul = 1 + ((s.speed || 1) - 1) * (boss ? 0.5 : 1);
+
+    this.maxHp = Math.round(this.maxHp * hpMul);
+    this.hp = this.maxHp;
+    this.speed *= spdMul;
+    this.baseSpeed = this.speed;
+
+    /* 攻击节奏：所有冷却类字段整体缩短（AI 代码不需要改动） */
+    if (rateMul > 1.001) {
+      const f = 1 / rateMul;
+      for (const k in this) {
+        const v = this[k];
+        if (typeof v === 'number' && v > 0.08 && /(Cd|Interval)$/.test(k)) this[k] = v * f;
+      }
+    }
+
+    if (boss) return;
+    const pool = ch.pool || {};
+
+    /* 弹幕复杂度：普通射击型敌人的主弹附带扇形附加弹（弹幕型敌人不加，避免无解） */
+    if (pool.spread > 0) {
+      const d = EnemyFactory.defOf(this.type);
+      const tags = (d && d.tags) || [];
+      if (tags.indexOf('bullethell') < 0) this.spreadFire = pool.spread;
+    }
+
+    /* 深层：普通敌人也可能自带精英词缀 */
+    if (pool.affix > 0 && !this.affix && this.rng.chance(pool.affix)) {
+      const keys = Object.keys(ELITE_AFFIX);
+      this.applyAffixes([this.rng.pick(keys)]);
+    }
   }
 
   /* 精英词缀（数据驱动，只改数值与标记，不动子类 AI） */
@@ -205,6 +266,7 @@ class Enemy {
   update(dt) {
     this.animT += dt;
     this.spawnT += dt;
+    if (this._spreadCd > 0) this._spreadCd -= dt;
     if (!this.spawned && this.spawnT >= this.spawnDur) {
       this.spawned = true;
       this.game.particles.ring(this.x, this.y, this.colors[1], 10, 110);
@@ -390,8 +452,8 @@ class Enemy {
     }
     ctx.restore();
 
-    /* 血条（受伤后才显示） */
-    if (this.hp < this.maxHp && !this.dead) {
+    /* 血条（受伤后才显示；Boss 走 UI 顶部大血条，这里跳过） */
+    if (this.hp < this.maxHp && !this.dead && !this.noSmallBar) {
       const w = this.r * 2.1, h = 4;
       const bx = this.x - w * 0.5, by = this.y - this.r - 12;
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
@@ -936,151 +998,846 @@ class Charger extends Enemy {
 }
 
 /* ===========================================================
-   4. 回廊守望者 · Warden（Boss）
-   三形态：环形弹幕 / 旋转螺旋弹 / 蓄力冲撞，血量阈值召唤残形
+   Boss 系统 · 通用组件与基类
+   -----------------------------------------------------------
+   所有 Boss 一律遵守的设计约定：
+     1. 三阶段：HP 降到 70% / 40% 时必定触发阶段变化
+     2. 阶段变化 = 攻击方式变化 + 攻击频率提高 + 解锁新弹幕模式
+     3. 每种攻击都有明确预警（预警线 / 预警圈 / 预警扇形），不存在无法躲避的攻击
+     4. 攻击类型覆盖：环形 / 扇形 / 螺旋 / 追踪 / 激光 / 冲刺 / 地面危险区域 / 召唤
+     5. 死亡必须先播完死亡动画，再真正从场上移除
    =========================================================== */
-class Warden extends Enemy {
+
+/* -----------------------------------------------------------
+   地面危险区域：预警圈 → 生效 → 消散（走开就能躲）
+   ----------------------------------------------------------- */
+class BossHazard {
+  constructor(boss, x, y, opt) {
+    opt = opt || {};
+    this.boss = boss;
+    this.game = boss.game;
+    this.x = x; this.y = y;
+    this.r = opt.r || 64;
+    this.r0 = this.r;
+    this.warn = opt.warn !== undefined ? opt.warn : 0.85;   // 预警时长
+    this.active = opt.active !== undefined ? opt.active : 2.4;
+    this.dmg = opt.dmg || 12;
+    this.color = opt.color || '#ff8a5c';
+    this.grow = opt.grow || 0;                              // 半径增长（熔岩扩张）
+    this.tickGap = opt.tickGap !== undefined ? opt.tickGap : 0.75;
+    this.hatch = opt.hatch || null;                         // 到期孵化（召唤机制）
+    this.drift = opt.drift || null;                         // 漂移（龙卷）
+    this.t = 0;
+    this.tickT = 0;
+    this.dead = false;
+  }
+
+  update(dt) {
+    this.t += dt;
+    if (this.drift) { this.x += this.drift.x * dt; this.y += this.drift.y * dt; }
+    if (this.t < this.warn) return;
+    if (this.grow) this.r = Math.min(this.r0 * 2.6, this.r + this.grow * dt);
+    this.tickT -= dt;
+    const p = this.game.player;
+    if (p && !p.dead && this.tickT <= 0) {
+      const rr = this.r + p.r * 0.35;
+      if (dist2(this.x, this.y, p.x, p.y) <= rr * rr) {
+        p.takeDamage(this.dmg, this.x, this.y);
+        this.tickT = this.tickGap;
+      }
+    }
+    if (this.t >= this.warn + this.active) {
+      this.dead = true;
+      if (this.hatch) this.boss.summon([this.hatch], 1);
+    }
+  }
+
+  draw(ctx) {
+    ctx.save();
+    if (this.t < this.warn) {
+      const p = clamp(this.t / this.warn, 0, 1);
+      ctx.globalAlpha = 0.16 + 0.26 * p;
+      ctx.strokeStyle = this.color;
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([9, 7]);
+      ctx.lineDashOffset = -this.t * 46;
+      ctx.beginPath(); ctx.arc(this.x, this.y, this.r, 0, TAU); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.10 + 0.20 * p;
+      ctx.fillStyle = this.color;
+      ctx.beginPath(); ctx.arc(this.x, this.y, this.r * p, 0, TAU); ctx.fill();
+    } else {
+      const left = this.warn + this.active - this.t;
+      const a = clamp(left / 0.45, 0, 1);
+      ctx.globalAlpha = 0.26 * a;
+      ctx.fillStyle = this.color;
+      ctx.beginPath(); ctx.arc(this.x, this.y, this.r, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 0.55 * a;
+      ctx.strokeStyle = this.color;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(this.x, this.y, this.r, 0, TAU); ctx.stroke();
+      ctx.globalAlpha = 0.12 * a;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(this.x, this.y, this.r * 0.5, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+/* -----------------------------------------------------------
+   激光：预警线 → 激发（看到线就有时间走开）
+   ----------------------------------------------------------- */
+class BossBeam {
+  constructor(boss, opt) {
+    opt = opt || {};
+    this.boss = boss;
+    this.game = boss.game;
+    this.x = opt.x !== undefined ? opt.x : boss.x;
+    this.y = opt.y !== undefined ? opt.y : boss.y;
+    this.angle = opt.angle || 0;
+    this.len = opt.len || 1500;
+    this.width = opt.width || 18;
+    this.warn = opt.warn !== undefined ? opt.warn : 0.75;
+    this.active = opt.active !== undefined ? opt.active : 0.4;
+    this.dmg = opt.dmg || 20;
+    this.color = opt.color || '#ff4d6b';
+    this.sweep = opt.sweep || 0;        // 角速度（扫射）
+    this.follow = !!opt.follow;         // 是否跟随 Boss
+    this.t = 0;
+    this.tickT = 0;
+    this.dead = false;
+  }
+
+  update(dt) {
+    this.t += dt;
+    if (this.sweep) this.angle += this.sweep * dt;
+    if (this.follow) { this.x = this.boss.x; this.y = this.boss.y; }
+    if (this.t < this.warn) return;
+    this.tickT -= dt;
+    const p = this.game.player;
+    if (p && !p.dead && this.tickT <= 0) {
+      const x2 = this.x + Math.cos(this.angle) * this.len;
+      const y2 = this.y + Math.sin(this.angle) * this.len;
+      if (pointSegDist(p.x, p.y, this.x, this.y, x2, y2) < this.width * 0.5 + p.r) {
+        p.takeDamage(this.dmg, this.x, this.y);
+        this.tickT = 0.55;
+      }
+    }
+    if (this.t >= this.warn + this.active) this.dead = true;
+  }
+
+  draw(ctx) {
+    const x2 = this.x + Math.cos(this.angle) * this.len;
+    const y2 = this.y + Math.sin(this.angle) * this.len;
+    ctx.save();
+    if (this.t < this.warn) {
+      const p = clamp(this.t / this.warn, 0, 1);
+      ctx.globalAlpha = 0.22 + 0.45 * p;
+      ctx.strokeStyle = this.color;
+      ctx.lineWidth = 1.5 + 3 * p;
+      ctx.setLineDash([16, 12]);
+      ctx.lineDashOffset = -this.t * 110;
+      ctx.beginPath(); ctx.moveTo(this.x, this.y); ctx.lineTo(x2, y2); ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      const q = clamp((this.t - this.warn) / this.active, 0, 1);
+      const a = q < 0.15 ? q / 0.15 : Math.max(0, 1 - (q - 0.15) / 0.85);
+      ctx.globalAlpha = 0.26 * a;
+      ctx.strokeStyle = this.color;
+      ctx.lineWidth = this.width * 2.0;
+      ctx.beginPath(); ctx.moveTo(this.x, this.y); ctx.lineTo(x2, y2); ctx.stroke();
+      ctx.globalAlpha = 0.85 * a;
+      ctx.strokeStyle = this.color;
+      ctx.lineWidth = this.width;
+      ctx.beginPath(); ctx.moveTo(this.x, this.y); ctx.lineTo(x2, y2); ctx.stroke();
+      ctx.globalAlpha = a;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = this.width * 0.34;
+      ctx.beginPath(); ctx.moveTo(this.x, this.y); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+/* -----------------------------------------------------------
+   Boss 基类
+   ----------------------------------------------------------- */
+class BossBase extends Enemy {
+  constructor(game, x, y, cfg) {
+    super(game, x, y, cfg);
+    this.isBoss = true;
+    this.title = cfg.title || '';
+    this.specialName = cfg.specialName || '';      // 特殊技能名
+
+    /* ---- 阶段 ---- */
+    this.phase = 1;
+    this.maxPhase = 3;
+    this.phaseNames = cfg.phaseNames || ['苏醒', '解封', '终末'];
+    this.phaseLock = 0;                            // >0：阶段转换演出中
+    this.phaseGates = [0.70, 0.40];                // 阶段阈值
+
+    /* ---- 攻击调度 ---- */
+    this.state = 'idle';
+    this.stateT = 1.0;
+    this.atkCd = 1.2;
+    this.attacks = [];                             // [{id, cn, w, min}] 数据驱动
+    this.telegraphText = null;                     // 供 UI 显示的当前预警
+    this.orbitDir = this.rng.chance(0.5) ? 1 : -1;
+
+    /* ---- 召唤 ---- */
+    this.minions = [];
+    this.summonPool = cfg.summonPool || ['chaser'];
+    this.maxMinions = cfg.maxMinions || 5;
+    this.summonCount = 0;
+
+    /* ---- 场景要素 ---- */
+    this.hazards = [];
+    this.beams = [];
+
+    /* ---- 受伤 / 死亡 ---- */
+    this.hurtRing = 0;
+    this.deathT = 0;
+    this.deathDur = 2.2;
+    this.deathBombT = 0;
+    this.dying = false;
+    this.introDone = false;
+
+    this.noSmallBar = true;                        // 血条走 UI 的 Boss 条
+    this.spawnDur = 1.25;                          // 出场更长，给玩家反应时间
+  }
+
+  /* =============== 阶段 =============== */
+  get atkRate() { return 1 + (this.phase - 1) * 0.30; }     // 攻击频率提高
+  get phaseSpeed() { return 1 + (this.phase - 1) * 0.20; }  // 移动 / 弹速提高
+
+  _checkPhase() {
+    const r = this.hp / this.maxHp;
+    let want = 1;
+    if (r <= this.phaseGates[1]) want = 3;
+    else if (r <= this.phaseGates[0]) want = 2;
+    if (want > this.phase) { this._enterPhase(want); return true; }
+    return false;
+  }
+
+  _enterPhase(n) {
+    this.phase = n;
+    this.phaseLock = 1.05;
+    this.state = 'idle';
+    this.stateT = 0.55;
+    this.atkCd = 0.55;
+    this.vx = 0; this.vy = 0;
+
+    this.game.addShake(6);
+    this.game.particles.ring(this.x, this.y, this.colors[1], 34, 300);
+    this.game.particles.burst(this.x, this.y, 26, {
+      speed: 300, life: 0.85, size: 6,
+      colors: [this.colors[1], '#ffffff', this.colors[0]]
+    });
+    this.game.ui.showBanner(this.name + ' · 第 ' + n + ' 阶段',
+      this.phaseNames[n - 1] + ' · 攻击更快，弹幕更密', 1.7);
+    this.onPhase(n);
+  }
+
+  /* =============== 更新 =============== */
+  onUpdate(dt) {
+    /* 0. 出场后的登场播报 */
+    if (!this.introDone) {
+      this.introDone = true;
+      this.game.ui.showBanner(this.name, this.title, 2.4);
+      this.game.addShake(4);
+    }
+
+    /* 1. 死亡动画（播完才真正移除） */
+    if (this.dying) { this._updateDeath(dt); return; }
+
+    /* 2. 阶段转换演出 */
+    if (this.phaseLock > 0) {
+      this.phaseLock -= dt;
+      this.vx *= 0.88; this.vy *= 0.88;
+      if (Math.random() < dt * 26) {
+        const a = Math.random() * TAU;
+        this.game.particles.spawn(
+          this.x + Math.cos(a) * this.r * 1.2, this.y + Math.sin(a) * this.r * 1.2,
+          Math.cos(a) * 60, Math.sin(a) * 60, rand(0.25, 0.5), rand(3, 6),
+          this.colors[1], { drag: 3 }
+        );
+      }
+      return;
+    }
+
+    /* 3. 阈值检查 */
+    if (this._checkPhase()) return;
+
+    /* 4. 场景要素 */
+    this._updateHazards(dt);
+    this._updateBeams(dt);
+    if (this.hurtRing > 0) this.hurtRing -= dt;
+
+    /* 5. 子类 AI */
+    this.telegraphText = null;
+    this.act(dt);
+  }
+
+  act(dt) {
+    /* 默认行为：中距游走 */
+    this.hover(dt, 220, 380);
+    this.tryTouchDamage(this.touchDamage);
+  }
+
+  _updateHazards(dt) {
+    for (let i = this.hazards.length - 1; i >= 0; i--) {
+      const h = this.hazards[i];
+      h.update(dt);
+      if (h.dead) this.hazards.splice(i, 1);
+    }
+  }
+
+  _updateBeams(dt) {
+    for (let i = this.beams.length - 1; i >= 0; i--) {
+      const b = this.beams[i];
+      b.update(dt);
+      if (b.dead) this.beams.splice(i, 1);
+    }
+  }
+
+  /* =============== 移动 helper =============== */
+  aimAngle() {
+    const p = this.game.player;
+    return angleTo(this.x, this.y, p.x, p.y);
+  }
+
+  hover(dt, minD, maxD, spd) {
+    const p = this.game.player;
+    const d = dist(this.x, this.y, p.x, p.y);
+    const a = angleTo(this.x, this.y, p.x, p.y);
+    const s = (spd === undefined ? this.speed : spd) * this.phaseSpeed;
+    let mx, my;
+    if (d > (maxD || 360)) { mx = Math.cos(a); my = Math.sin(a); }
+    else if (d < (minD || 220)) { mx = -Math.cos(a); my = -Math.sin(a); }
+    else {
+      mx = Math.cos(a + Math.PI / 2) * this.orbitDir;
+      my = Math.sin(a + Math.PI / 2) * this.orbitDir;
+    }
+    this.vx = mx * s;
+    this.vy = my * s;
+    this.face = angleLerp(this.face, a, Math.min(1, 3.2 * dt));
+    return d;
+  }
+
+  brake(k) { const f = k === undefined ? 0.86 : k; this.vx *= f; this.vy *= f; }
+
+  /* 冲刺一步：撞墙时立刻停下并返回 'wall'（供硬直 / 震荡波用） */
+  dashMove(dt, angle, speed, damage, extraRange) {
+    const nx = this.x + Math.cos(angle) * speed * dt;
+    const ny = this.y + Math.sin(angle) * speed * dt;
+    if (this.game.room && this.game.room.hitsWall(nx, ny, this.r)) {
+      this.vx = 0; this.vy = 0;
+      return 'wall';
+    }
+    this.vx = Math.cos(angle) * speed;
+    this.vy = Math.sin(angle) * speed;
+    if (Math.random() < dt * 45) {
+      this.game.particles.trail(this.x, this.y, 'rgba(255,255,255,0.22)', 9);
+    }
+    if (damage) this.tryTouchDamage(damage, extraRange);
+    return 'run';
+  }
+
+  /* =============== 弹幕 helper =============== */
+  /* 环形弹幕：可留连续缺口（永远留一条能走出去的路） */
+  ringShot(count, opt) {
+    opt = opt || {};
+    const gap = opt.gap || 0;
+    const base = opt.rot !== undefined ? opt.rot : this.rng.range(0, TAU);
+    const skipFrom = opt.gapAt !== undefined ? opt.gapAt : Math.floor(this.rng.next() * count);
+    let fired = 0;
+    for (let i = 0; i < count; i++) {
+      if (gap > 0) {
+        const rel = (i - skipFrom + count) % count;
+        if (rel < gap) continue;
+      }
+      this.fireBullet(base + (i / count) * TAU, {
+        speed: opt.speed || 250,
+        damage: opt.damage || 9,
+        r: opt.r || 7,
+        color: opt.color || this.colors[1],
+        core: opt.core || '#ffffff',
+        life: opt.life || 4.4,
+        spin: opt.spin !== undefined ? opt.spin : 6,
+        homing: opt.homing || 0,
+        offset: opt.dist
+      });
+      fired++;
+    }
+    this.game.particles.ring(this.x, this.y, opt.color || this.colors[1],
+      Math.max(6, Math.round(count * 0.7)), 210);
+    return fired;
+  }
+
+  /* 扇形弹幕 */
+  fanShot(count, spread, aim, opt) {
+    opt = opt || {};
+    const a0 = aim === undefined ? this.aimAngle() : aim;
+    const s = spread === undefined ? 0.9 : spread;
+    for (let i = 0; i < count; i++) {
+      const t = count === 1 ? 0.5 : i / (count - 1);
+      this.fireBullet(a0 - s * 0.5 + s * t, {
+        speed: opt.speed || 300,
+        damage: opt.damage || 10,
+        r: opt.r || 7,
+        color: opt.color || this.colors[1],
+        core: opt.core || '#ffffff',
+        life: opt.life || 3.6,
+        spin: opt.spin !== undefined ? opt.spin : 4,
+        homing: opt.homing || 0,
+        offset: opt.dist
+      });
+    }
+  }
+
+  /* 螺旋弹幕：单帧一次，angle 由调用方推进 */
+  spiralShot(arms, angle, opt) {
+    opt = opt || {};
+    for (let i = 0; i < arms; i++) {
+      const a = angle + (i / arms) * TAU;
+      this.fireBullet(a, {
+        speed: opt.speed || 285,
+        damage: opt.damage || 9,
+        r: opt.r || 6.5,
+        color: opt.color || this.colors[1],
+        core: opt.core || '#ffffff',
+        life: opt.life || 4.2,
+        spin: opt.spin !== undefined ? opt.spin : 8,
+        homing: opt.homing || 0,
+        offset: opt.dist
+      });
+    }
+  }
+
+  /* 追踪弹：朝玩家附近散布，转向速率受限（可绕开） */
+  homingShot(count, opt) {
+    opt = opt || {};
+    const base = this.aimAngle();
+    const spread = opt.spread === undefined ? 1.0 : opt.spread;
+    for (let i = 0; i < count; i++) {
+      const a = base + (count === 1 ? 0 : (i / (count - 1) - 0.5) * spread);
+      this.fireBullet(a, {
+        speed: opt.speed || 210,
+        damage: opt.damage || 11,
+        r: opt.r || 8,
+        color: opt.color || this.colors[2] || this.colors[1],
+        core: opt.core || '#ffffff',
+        life: opt.life || 3.4,
+        spin: opt.spin !== undefined ? opt.spin : 9,
+        homing: opt.homing || 1,
+        offset: opt.dist
+      });
+    }
+  }
+
+  /* =============== 场景要素 helper =============== */
+  addHazard(x, y, opt) {
+    const pos = arenaClamp(x, y, 60);
+    const h = new BossHazard(this, pos.x, pos.y, opt);
+    this.hazards.push(h);
+    return h;
+  }
+
+  addBeam(opt) {
+    const b = new BossBeam(this, opt);
+    this.beams.push(b);
+    return b;
+  }
+
+  /* =============== 召唤 =============== */
+  summon(types, n) {
+    const room = this.game.room;
+    if (!room || !types || !types.length) return 0;
+    let made = 0;
+    for (let i = 0; i < n; i++) {
+      if (this.minions.filter(m => !m.dead).length >= this.maxMinions) break;
+      const t = types[(this.summonCount + i) % types.length];
+      const e = room._spawnEnemy(t);
+      if (!e) continue;
+      e.spawnT = e.spawnDur * 0.55;
+      this.minions.push(e);
+      this.summonCount++;
+      made++;
+      this.game.particles.ring(e.x, e.y, this.colors[1], 12, 160);
+    }
+    if (made) {
+      this.game.damageNumbers.add(this.x, this.y - this.r - 20, '召唤', {
+        color: this.colors[1], life: 1.0, vy: -40
+      });
+    }
+    return made;
+  }
+
+  /* =============== 攻击选择（数据驱动） =============== */
+  _pick(list) {
+    const usable = list.filter(a => this.phase >= (a.min || 1));
+    const use = usable.length ? usable : list;
+    let sum = 0;
+    for (const a of use) sum += (a.w || 1);
+    let r = this.rng.next() * sum;
+    for (const a of use) { r -= (a.w || 1); if (r <= 0) return a.id; }
+    return use[use.length - 1].id;
+  }
+
+  /* =============== 受伤反馈 =============== */
+  applyStatus(kind, level) {
+    /* Boss 不会被长时间冻结，只会被短暂迟滞（否则会被控到死） */
+    if (kind === 'freeze') {
+      this.freezeT = Math.max(this.freezeT, Math.min(0.30, 0.12 + 0.06 * level));
+      return;
+    }
+    super.applyStatus(kind, level);
+  }
+
+  takeDamage(amount, srcX, srcY) {
+    if (this.dying || this.dead) return;
+    /* 阶段转换演出期间减伤，避免刚进阶段就被一轮爆发打穿 */
+    if (this.phaseLock > 0) amount *= 0.45;
+    super.takeDamage(amount, srcX, srcY);
+    if (this.dead || this.dying) return;
+    this.hurtRing = 0.34;
+    this.onHurt(amount, srcX, srcY);
+  }
+
+  onHurt(amount, srcX, srcY) {
+    /* 默认受伤反馈：裂纹环 + 碎屑（白闪与火花由基类完成） */
+    this.game.particles.burst(this.x, this.y, 3, {
+      speed: 130, life: 0.32, size: 3.4, color: this.colors[1],
+      dir: angleTo(srcX, srcY, this.x, this.y), spread: 1.6
+    });
+  }
+
+  /* =============== 死亡动画 =============== */
+  die() {
+    if (this.dying || this.dead) return;
+    this.dying = true;
+    this.deathT = 0;
+    this.deathBombT = 0.2;
+    this.vx = 0; this.vy = 0;
+    this.hazards.length = 0;
+    this.beams.length = 0;
+    this.telegraphText = null;
+    this.game.addShake(8);
+    this.game.ui.showBanner(this.name + ' 陨落', '房间解除 · 拾取战利品', 2.8);
+
+    /* 召唤物随主人一起崩解（不留下拖时间的小怪） */
+    for (const m of this.minions) {
+      if (m && !m.dead) {
+        this.game.particles.ring(m.x, m.y, this.colors[1], 10, 130);
+        m.die();
+      }
+    }
+    this.onDeathStart();
+  }
+
+  _updateDeath(dt) {
+    this.deathT += dt;
+    this.vx = 0; this.vy = 0;
+    this.onDeath(dt);
+    if (this.deathT >= this.deathDur) {
+      this.dying = false;
+      super.die();
+    }
+  }
+
+  onDeath(dt) {
+    /* 默认死亡动画：连续内爆 + 抖动 */
+    this.deathBombT -= dt;
+    if (this.deathBombT <= 0) {
+      this.deathBombT = 0.24;
+      const a = this.rng.range(0, TAU);
+      const rr = this.rng.range(0, this.r * 1.5);
+      this.game.particles.burst(this.x + Math.cos(a) * rr, this.y + Math.sin(a) * rr, 12, {
+        speed: 220, life: 0.6, size: 5,
+        colors: [this.colors[1], '#ffffff', this.colors[0]]
+      });
+      this.game.addShake(2.2);
+    }
+  }
+
+  /* =============== 钩子（子类实现） =============== */
+  onPhase(n) {}
+  onDeathStart() {}
+  onHurtVisual(ctx) {}
+
+  /* =============== 绘制 =============== */
+  draw(ctx) {
+    /* 场景要素在世界坐标下绘制（地面危险区域 / 激光） */
+    for (const h of this.hazards) h.draw(ctx);
+    for (const b of this.beams) b.draw(ctx);
+    super.draw(ctx);
+  }
+
+  /* 脚下符环（所有 Boss 通用，阶段越高转得越快） */
+  drawAura(ctx, r, color) {
+    const t = this.animT;
+    ctx.save();
+    ctx.globalAlpha = 0.22 + 0.10 * Math.sin(t * 3);
+    ctx.strokeStyle = color || this.colors[1];
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.stroke();
+    ctx.globalAlpha = 0.5;
+    ctx.rotate(t * (0.5 + 0.25 * this.phase));
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * TAU;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * r * 0.92, Math.sin(a) * r * 0.92);
+      ctx.lineTo(Math.cos(a) * r * 1.1, Math.sin(a) * r * 1.1);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* 裂纹（血量越低越密） */
+  drawCracks(ctx, r, color) {
+    const hurt = 1 - clamp(this.hp / this.maxHp, 0, 1);
+    const n = 3 + Math.round(hurt * 5);
+    ctx.save();
+    ctx.globalAlpha = 0.25 + hurt * 0.55;
+    ctx.strokeStyle = color || '#ffffff';
+    ctx.lineWidth = 1.8;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * TAU + this.animT * 0.15;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * r * 0.18, Math.sin(a) * r * 0.18);
+      ctx.lineTo(Math.cos(a + 0.22) * r * 0.62, Math.sin(a + 0.22) * r * 0.62);
+      ctx.lineTo(Math.cos(a - 0.12) * r * 0.95, Math.sin(a - 0.12) * r * 0.95);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* 死亡演出：整体缩小 + 抖动 + 白炽 */
+  deathTransform(ctx) {
+    const t = clamp(this.deathT / this.deathDur, 0, 1);
+    const shake = (1 - t) * 5;
+    ctx.translate(rand(-shake, shake), rand(-shake, shake));
+    const s = 1 + Math.sin(t * Math.PI) * 0.22 - t * 0.55;
+    ctx.scale(Math.max(0.15, s), Math.max(0.15, s));
+    ctx.globalAlpha = clamp(1.25 - t, 0, 1);
+    return t;
+  }
+}
+
+/* ===========================================================
+   1. 回廊守望者 · Warden（Boss）
+   三眼随阶段睁开：环形弹幕 / 螺旋弹幕 / 扇形弹幕 / 蓄力冲撞 / 召唤残形
+   =========================================================== */
+class Warden extends BossBase {
   constructor(game, x, y, rng) {
     super(game, x, y, {
       name: '回廊守望者',
+      title: '三眼睁开之时，回廊开始崩解',
       r: 34,
       hp: 460,
       speed: 88,
       touchDamage: 16,
       touchInterval: 0.8,
-      mass: 6,
+      mass: 7,
       rng: rng,
-      colors: ['#4a2b52', '#ff6bd0', '#ff4d6b']
+      colors: ['#4a2b52', '#ff6bd0', '#ff4d6b'],
+      specialName: '三眼睁开',
+      phaseNames: ['独眼凝视', '双眼洞开', '三眼全睁'],
+      summonPool: ['chaser', 'charger'],
+      maxMinions: 5
     });
-    this.isBoss = true;
-    this.phase = 1;
-    this.state = 'hover';
-    this.stateT = this.rng.range(0.6, 1.2);
-    this.cd = 1.4;
     this.spiralAngle = this.rng.range(0, TAU);
-    this.spiralShots = 0;
+    this.spiralLeft = 0;
     this.ringLeft = 0;
     this.dashDir = 0;
     this.spin = 0;
-    this.summoned = 0;
+    this.specialCd = 8.0;              // 三眼睁开
+    this.deathDur = 2.3;
+    this.attacks = [
+      { id: 'ring', cn: '环形弹幕', w: 30 },
+      { id: 'spiral', cn: '螺旋弹幕', w: 26 },
+      { id: 'dash', cn: '蓄力冲撞', w: 24 },
+      { id: 'fan', cn: '扇形棱晶', w: 16, min: 2 },
+      { id: 'summon', cn: '召唤残形', w: 14 }
+    ];
   }
 
-  _bullet(angle, speed, r, damage) {
-    return {
-      x: this.x + Math.cos(angle) * (this.r + 8),
-      y: this.y + Math.sin(angle) * (this.r + 8),
-      angle: angle,
-      speed: speed,
-      damage: damage,
-      r: r || 7,
-      friendly: false,
-      color: '#ff6bd0',
-      core: '#ffe0f5',
-      life: 4.0,
-      spin: 6
-    };
+  onPhase(n) {
+    /* 每阶段多睁一只眼 → 弹幕臂数与召唤量同步增加 */
+    this.summon(n === 2 ? ['chaser'] : ['chaser', 'charger'], n === 2 ? 2 : 3);
+    this.spin = 0;
+    this.specialCd = 1.4;              // 进阶段立刻睁眼
   }
 
-  _ring(count, speed, offset) {
-    for (let i = 0; i < count; i++) {
-      const a = offset + (i / count) * TAU;
-      this.game.spawnProjectile(this._bullet(a, speed, 7, 9));
-    }
-    this.game.particles.ring(this.x, this.y, '#ff6bd0', count, 220);
+  onHurt() {
+    this.game.particles.burst(this.x, this.y, 3, {
+      speed: 140, life: 0.3, size: 3.4, color: '#ff6bd0'
+    });
   }
 
-  onUpdate(dt) {
+  act(dt) {
     const p = this.game.player;
     const d = dist(this.x, this.y, p.x, p.y);
-    this.spin += dt * 0.9;
+    this.spin += dt * (0.8 + 0.35 * this.phase);
 
-    /* 形态切换 */
-    const ratio = this.hp / this.maxHp;
-    const wantPhase = ratio > 0.66 ? 1 : (ratio > 0.33 ? 2 : 3);
-    if (wantPhase !== this.phase) {
-      this.phase = wantPhase;
-      this.state = 'hover';
-      this.stateT = 0.7;
-      this.game.addShake(6);
-      this.game.particles.ring(this.x, this.y, '#ff4d6b', 30, 280);
-      this.game.ui.showBanner('守望者 · 形态 ' + wantPhase, '回廊开始崩解', 1.4);
-      /* 召唤残形 */
-      const n = wantPhase === 2 ? 2 : 3;
-      for (let i = 0; i < n; i++) {
-        const room = this.game.room;
-        if (room && this.summoned < 8) {
-          const e = room._spawnEnemy(wantPhase === 3 && i === 0 ? 'charger' : 'chaser');
-          if (e) { e.spawnT = e.spawnDur * 0.6; this.summoned++; }
-        }
+    /* 攻击计时：阶段越高越快 */
+    this.atkCd -= dt * this.atkRate;
+    this.specialCd -= dt * this.atkRate;
+
+    switch (this.state) {
+      case 'idle': {
+        this.hover(dt, 200, 340);
+        this.tryTouchDamage(this.touchDamage);
+        if (this.specialCd <= 0) { this.state = 'gazeWind'; this.stateT = 0.9; }
+        else if (this.atkCd <= 0) this._start(this._pick(this.attacks));
+        break;
       }
+      case 'ringWind': {
+        this.brake(0.82);
+        this.telegraphText = '环形弹幕';
+        this.stateT -= dt;
+        if (this.stateT <= 0) {
+          this.ringShot(this.phase >= 3 ? 20 : (this.phase >= 2 ? 16 : 12), {
+            speed: 250, damage: 9, gap: 3, r: 7, color: '#ff6bd0', core: '#ffe0f5'
+          });
+          this.ringLeft--;
+          if (this.ringLeft > 0) this.stateT = 0.34;
+          else { this.state = 'idle'; this.atkCd = 1.0; }
+        }
+        break;
+      }
+      case 'spiral': {
+        this.brake(0.9);
+        this.telegraphText = '螺旋弹幕';
+        this.stateT -= dt;
+        this.spiralLeft -= dt;
+        if (this.spiralLeft <= 0) {
+          this.spiralLeft = 0.085;
+          this.spiralAngle += 0.42 * this.phaseSpeed;
+          this.spiralShot(this.phase >= 2 ? 3 : 2, this.spiralAngle, {
+            speed: 300, damage: 8, r: 6, color: '#ff6bd0'
+          });
+        }
+        if (this.stateT <= 0) { this.state = 'idle'; this.atkCd = 1.0; }
+        break;
+      }
+      case 'fanWind': {
+        this.brake(0.86);
+        this.telegraphText = '扇形棱晶';
+        this.face = angleLerp(this.face, this.aimAngle(), Math.min(1, 7 * dt));
+        this.stateT -= dt;
+        if (this.stateT <= 0) {
+          this.fanShot(this.phase >= 3 ? 9 : 7, 1.05, this.face, {
+            speed: 320, damage: 10, r: 7, color: '#ff4d6b'
+          });
+          this.state = 'idle';
+          this.atkCd = 0.9;
+        }
+        break;
+      }
+      case 'windup': {
+        this.brake(0.78);
+        this.telegraphText = '蓄力冲撞';
+        this.face = angleLerp(this.face, this.aimAngle(), Math.min(1, 6 * dt));
+        this.stateT -= dt;
+        if (Math.random() < dt * 30) {
+          this.game.particles.spawn(this.x + rand(-24, 24), this.y + rand(-24, 24),
+            rand(-40, 40), rand(-40, 40), rand(0.2, 0.45), rand(3, 6),
+            'rgba(255,90,170,0.55)', { drag: 3 });
+        }
+        if (this.stateT <= 0) {
+          this.dashDir = this.face;
+          this.state = 'dash';
+          this.stateT = 0.5;
+          this.game.addShake(2.2);
+        }
+        break;
+      }
+      case 'dash': {
+        this.stateT -= dt;
+        const sp = 620 * this.phaseSpeed;
+        this.vx = Math.cos(this.dashDir) * sp;
+        this.vy = Math.sin(this.dashDir) * sp;
+        if (Math.random() < dt * 50) {
+          this.game.particles.trail(this.x, this.y, 'rgba(255,90,170,0.35)', 12);
+        }
+        this.tryTouchDamage(Math.round(this.touchDamage * 1.4), 6);
+        if (this.stateT <= 0) { this.state = 'idle'; this.atkCd = 1.1; }
+        break;
+      }
+      case 'summonCast': {
+        this.brake(0.8);
+        this.telegraphText = '召唤残形';
+        this.stateT -= dt;
+        if (this.stateT <= 0) {
+          this.summon(this.summonPool, this.phase >= 3 ? 3 : 2);
+          this.state = 'idle';
+          this.atkCd = 1.3;
+        }
+        break;
+      }
+      case 'gazeWind': {
+        /* 特殊技能：三眼睁开 —— 旋转凝视激光 + 环形弹幕 */
+        this.brake(0.8);
+        this.telegraphText = '三眼睁开';
+        this.stateT -= dt;
+        if (this.stateT <= 0) { this.state = 'gaze'; this.stateT = 0.8; this._gaze(); }
+        break;
+      }
+      case 'gaze': {
+        this.brake(0.94);
+        this.stateT -= dt;
+        if (this.stateT <= 0) { this.state = 'idle'; this.atkCd = 1.2; this.specialCd = 9.5; }
+        break;
+      }
+      default:
+        this.state = 'idle';
+        break;
     }
+  }
 
-    const speedMul = 1 + (this.phase - 1) * 0.35;
+  _gaze() {
+    const arms = 2 + this.phase;                    // 阶段越高睁眼越多
+    const base = this.aimAngle();
+    const dir = this.rng.chance(0.5) ? 0.45 : -0.45;
+    for (let i = 0; i < arms; i++) {
+      this.addBeam({
+        x: this.x, y: this.y, angle: base + (i / arms) * TAU,
+        warn: 0.75, active: 0.6, width: 15, dmg: 17,
+        color: '#ff6bd0', sweep: dir, follow: true
+      });
+    }
+    this.ringShot(this.phase >= 2 ? 16 : 12, {
+      speed: 240, damage: 9, gap: 4, r: 7, color: '#ff6bd0'
+    });
+    this.game.addShake(3.5);
+    this.game.particles.ring(this.x, this.y, '#ff6bd0', 24, 280);
+  }
 
-    if (this.state === 'hover') {
-      /* 缓慢逼近并保持中距 */
-      const a = angleTo(this.x, this.y, p.x, p.y);
-      const sp = this.speed * speedMul * (d > 300 ? 1 : (d < 200 ? -0.5 : 0.25));
-      this.face = angleLerp(this.face, a, Math.min(1, 3 * dt));
-      this.vx = Math.cos(a) * Math.max(0, sp) + Math.cos(a + Math.PI / 2) * 40 * Math.sin(this.animT * 1.2);
-      this.vy = Math.sin(a) * Math.max(0, sp) + Math.sin(a + Math.PI / 2) * 40 * Math.sin(this.animT * 1.2);
-      this.tryTouchDamage(this.touchDamage);
+  _start(id) {
+    if (id === 'ring') { this.state = 'ringWind'; this.stateT = 0.55; this.ringLeft = this.phase >= 2 ? 3 : 2; }
+    else if (id === 'spiral') { this.state = 'spiral'; this.stateT = 1.4; this.spiralLeft = 0; }
+    else if (id === 'fan') { this.state = 'fanWind'; this.stateT = 0.55; }
+    else if (id === 'dash') { this.state = 'windup'; this.stateT = 0.62; }
+    else { this.state = 'summonCast'; this.stateT = 0.6; }
+  }
 
-      this.stateT -= dt;
-      if (this.stateT <= 0) {
-        const roll = this.rng.next();
-        if (roll < 0.36) { this.state = 'ring'; this.stateT = 0.55; this.ringLeft = this.phase >= 2 ? 3 : 2; }
-        else if (roll < 0.68) { this.state = 'spiral'; this.stateT = 1.5; this.spiralShots = 0; }
-        else { this.state = 'windup'; this.stateT = 0.6; }
-      }
-    } else if (this.state === 'ring') {
-      this.stateT -= dt;
-      this.vx *= 0.85; this.vy *= 0.85;
-      if (this.stateT <= 0) {
-        this._ring(this.phase >= 3 ? 18 : 14, 250, this.rng.range(0, TAU));
-        this.ringLeft--;
-        if (this.ringLeft > 0) this.stateT = 0.28;
-        else { this.state = 'hover'; this.stateT = 0.9; }
-      }
-    } else if (this.state === 'spiral') {
-      this.stateT -= dt;
-      this.vx *= 0.9; this.vy *= 0.9;
-      this.spiralAngle += dt * 3.4 * speedMul;
-      this.spiralShots -= dt;
-      if (this.spiralShots <= 0) {
-        this.spiralShots = 0.075;
-        for (let i = 0; i < (this.phase >= 2 ? 3 : 2); i++) {
-          const a = this.spiralAngle + (i / (this.phase >= 2 ? 3 : 2)) * TAU;
-          this.game.spawnProjectile(this._bullet(a, 300, 6, 8));
-        }
-      }
-      if (this.stateT <= 0) { this.state = 'hover'; this.stateT = 1.0; }
-    } else if (this.state === 'windup') {
-      this.stateT -= dt;
-      this.vx *= 0.8; this.vy *= 0.8;
-      this.face = angleLerp(this.face, angleTo(this.x, this.y, p.x, p.y), Math.min(1, 6 * dt));
-      if (Math.random() < dt * 30) {
-        this.game.particles.spawn(this.x + rand(-24, 24), this.y + rand(-24, 24),
-          rand(-40, 40), rand(-40, 40), rand(0.2, 0.45), rand(3, 6),
-          'rgba(255,90,170,0.55)', { drag: 3 });
-      }
-      if (this.stateT <= 0) {
-        this.dashDir = angleTo(this.x, this.y, p.x, p.y);
-        this.state = 'dash';
-        this.stateT = 0.5;
-        this.game.addShake(2);
-      }
-    } else if (this.state === 'dash') {
-      this.stateT -= dt;
-      this.face = this.dashDir;
-      const sp = 620 * speedMul;
-      this.vx = Math.cos(this.dashDir) * sp;
-      this.vy = Math.sin(this.dashDir) * sp;
-      if (Math.random() < dt * 50) {
-        this.game.particles.trail(this.x, this.y, 'rgba(255,90,170,0.35)', 12);
-      }
-      this.tryTouchDamage(Math.round(this.touchDamage * 1.4), 6);
-      if (this.stateT <= 0) { this.state = 'hover'; this.stateT = 1.1; }
+  onDeathStart() {
+    this.game.particles.ring(this.x, this.y, '#ff4d6b', 30, 260);
+  }
+
+  onDeath(dt) {
+    /* 三只眼依次熄灭，每熄一只炸一次 */
+    const step = Math.floor(this.deathT / 0.62);
+    if (step !== this._deathStep) {
+      this._deathStep = step;
+      this.game.particles.burst(this.x, this.y, 18, {
+        speed: 260, life: 0.7, size: 5, colors: ['#ff6bd0', '#ff4d6b', '#ffffff']
+      });
+      this.game.particles.ring(this.x, this.y, '#ff6bd0', 16, 200);
+      this.game.addShake(3);
     }
   }
 
@@ -1089,9 +1846,11 @@ class Warden extends Enemy {
     const winding = this.state === 'windup';
     const dashing = this.state === 'dash';
 
-    /* 蓄力预警 */
+    this.drawAura(ctx, this.r + 16, '#ff6bd0');
+
+    /* 蓄力预警线 */
     if (winding) {
-      const g = 1 - this.stateT / 0.6;
+      const g = 1 - this.stateT / 0.62;
       ctx.save();
       ctx.rotate(this.face);
       ctx.globalAlpha = 0.25 + 0.45 * g;
@@ -1101,7 +1860,7 @@ class Warden extends Enemy {
       ctx.lineDashOffset = -t * 70;
       ctx.beginPath();
       ctx.moveTo(this.r, 0);
-      ctx.lineTo(this.r + 600 * (0.4 + 0.6 * g), 0);
+      ctx.lineTo(this.r + 620 * (0.4 + 0.6 * g), 0);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.restore();
@@ -1110,16 +1869,17 @@ class Warden extends Enemy {
     /* 外环旋转护板 */
     ctx.save();
     ctx.rotate(this.spin);
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * TAU;
+    const plates = 4 + this.phase;
+    for (let i = 0; i < plates; i++) {
+      const a = (i / plates) * TAU;
       ctx.save();
       ctx.rotate(a);
       ctx.fillStyle = i % 2 ? '#5c3566' : '#3b2244';
       polygonPath(ctx, [
-        [this.r + 16, -9],
-        [this.r + 30, 0],
-        [this.r + 16, 9],
-        [this.r + 4, 0]
+        [this.r + 14, -9],
+        [this.r + 28, 0],
+        [this.r + 14, 9],
+        [this.r + 2, 0]
       ]);
       ctx.fill();
       ctx.strokeStyle = 'rgba(255,107,208,0.5)';
@@ -1131,7 +1891,7 @@ class Warden extends Enemy {
 
     /* 主体 */
     ctx.save();
-    if (winding) ctx.translate(rand(-2, 2), rand(-2, 2));
+    if (this.dying) this.deathTransform(ctx);
     const pulse = 1 + Math.sin(t * 2.4) * 0.04;
     ctx.scale(pulse, pulse);
 
@@ -1152,7 +1912,7 @@ class Warden extends Enemy {
     ctx.lineWidth = 2.5;
     ctx.stroke();
 
-    /* 三只眼（形态越多睁得越多） */
+    /* 三只眼（阶段越高睁得越多） */
     for (let i = 0; i < 3; i++) {
       const open = i < this.phase;
       const a = -Math.PI / 2 + (i - 1) * 0.7;
@@ -1171,20 +1931,20 @@ class Warden extends Enemy {
       }
     }
 
-    /* 核心裂纹（血量越低越亮） */
-    const hurt = 1 - this.hp / this.maxHp;
-    ctx.globalAlpha = 0.3 + hurt * 0.6;
-    ctx.strokeStyle = dashing ? '#ffffff' : '#ff4d6b';
-    ctx.lineWidth = 2;
-    for (let i = 0; i < 4; i++) {
-      const a = t * 0.6 + (i / 4) * TAU;
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * 8, Math.sin(a) * 8);
-      ctx.lineTo(Math.cos(a) * this.r * 0.7, Math.sin(a) * this.r * 0.7);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
+    this.drawCracks(ctx, this.r * 0.9, dashing ? '#ffffff' : '#ff4d6b');
     ctx.restore();
+
+    /* 受伤环 */
+    if (this.hurtRing > 0) {
+      ctx.save();
+      ctx.globalAlpha = clamp(this.hurtRing / 0.34, 0, 1) * 0.6;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, this.r + 12 + (1 - this.hurtRing / 0.34) * 26, 0, TAU);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 }
 
@@ -1239,4 +1999,7 @@ EnemyFactory.register('shooter', Shooter, {
 EnemyFactory.register('charger', Charger, {
   r: 19, cat: 'melee', role: 'charge', cost: 4, minDepth: 0, tags: ['mobile'], coin: 3
 });
-EnemyFactory.register('boss', Warden, { r: 34, coin: 0, hidden: true, cat: 'boss' });
+EnemyFactory.register('boss', Warden, {
+  r: 34, coin: 0, hidden: true, cat: 'boss',
+  boss: { name: '回廊守望者', title: '三眼睁开之时，回廊开始崩解', minFloor: 1 }
+});

@@ -150,6 +150,112 @@ class Chest extends Prop {
 }
 
 /* -----------------------------------------------------------
+   Boss 遗物（Boss 房通关掉落）—— 必定是一件强力道具
+   ----------------------------------------------------------- */
+class BossRelic extends Prop {
+  constructor(game, x, y, rng) {
+    super(game, x, y, { r: 26 });
+    this.rng = rng;
+    const build = game.player ? game.player.build : null;
+    this.item = pickStrongItem(rng, build);
+    this.label = '取走首领遗物';
+    this.openT = 0;
+  }
+
+  use() {
+    if (!super.use()) return false;
+    const p = this.game.player;
+    const got = p.gainItem(this.item.id);
+    if (!got) return false;
+    this.game.ui.showBanner('遗物 · ' + got.name, got.desc, 3.2);
+    this.game.damageNumbers.add(this.x, this.y - 32, this.item.name, {
+      color: this.item.color, life: 1.5, vy: -42
+    });
+    this.game.particles.burst(this.x, this.y, 34, {
+      speed: 240, life: 0.9, size: 6,
+      colors: [this.item.color, '#ffffff', '#ffd35e']
+    });
+    this.game.particles.ring(this.x, this.y, this.item.color, 24, 220);
+    this.game.addShake(3);
+    return true;
+  }
+
+  update(dt) {
+    super.update(dt);
+    if (this.used && this.openT < 1) this.openT = Math.min(1, this.openT + dt * 2);
+    /* 未拾取时持续散发星屑 */
+    if (!this.used && Math.random() < dt * 12) {
+      const a = Math.random() * TAU;
+      this.game.particles.spawn(this.x + Math.cos(a) * 22, this.y + Math.sin(a) * 22,
+        Math.cos(a) * 18, Math.sin(a) * 18 - 26, rand(0.5, 1.0), rand(2, 4),
+        this.item.color, { drag: 1.2 });
+    }
+  }
+
+  draw(ctx) {
+    const t = this.animT;
+    const col = this.used ? '#5d6f7e' : this.item.color;
+    this.drawBase(ctx, col, 0.42);
+    if (!this.used) this.drawMarker(ctx, col);
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.translate(0, this.used ? 0 : Math.sin(t * 2) * 3);
+
+    /* 三柱残骸托起的光核 */
+    ctx.strokeStyle = '#3a2a18';
+    ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 3; i++) {
+      const a = -Math.PI / 2 + (i - 1) * 1.1;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * 12, Math.sin(a) * 12 + 8);
+      ctx.lineTo(Math.cos(a) * 20, Math.sin(a) * 20 + 20);
+      ctx.stroke();
+    }
+
+    /* 光核 */
+    const rr = 13 + Math.sin(t * 3) * 1.6;
+    const g = ctx.createRadialGradient(0, -2, 2, 0, -2, 30);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.35, col);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = this.used ? 0.35 : 1;
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, -2, 30, 0, TAU);
+    ctx.fill();
+
+    ctx.fillStyle = this.used ? '#4a5666' : '#ffffff';
+    ctx.beginPath();
+    ctx.arc(0, -2, rr * 0.5, 0, TAU);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    /* 旋转棱框 */
+    ctx.save();
+    ctx.rotate(t * 0.9);
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 2;
+    polygonPath(ctx, [[0, -22], [19, 11], [-19, 11]]);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.restore();
+
+    /* 未拾取时显示道具名 */
+    if (!this.used) {
+      ctx.save();
+      ctx.font = '700 12px "Segoe UI", "PingFang SC", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = col;
+      ctx.fillText(this.item.name, this.x, this.y - 42);
+      ctx.restore();
+    }
+  }
+}
+
+/* -----------------------------------------------------------
    异象祭坛（Event）—— 随机正负效果
    ----------------------------------------------------------- */
 class Shrine extends Prop {
@@ -319,9 +425,9 @@ class Pedestal extends Prop {
    层间裂隙（Boss 房通关后出现）
    ----------------------------------------------------------- */
 class Portal extends Prop {
-  constructor(game, x, y) {
+  constructor(game, x, y, label) {
     super(game, x, y, { r: 30 });
-    this.label = '进入下一层';
+    this.label = label || '进入下一层';
   }
 
   use() {

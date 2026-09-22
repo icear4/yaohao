@@ -31,6 +31,10 @@ class Room {
                          this.type === ROOM_TYPE.ELITE ||
                          this.type === ROOM_TYPE.BOSS);
 
+    /* 章节（层数 → 主题）：视觉 / 敌人 / 环境障碍 / Boss 全部由它决定 */
+    this.floor = (opts.depth || 0) + 1;
+    this.chapter = ChapterOf(this.floor);
+
     this.state = this.isCombatRoom ? 'fighting' : 'clear';
     this.doorsOpen = !this.isCombatRoom;
     this.clearTime = 0;
@@ -38,11 +42,13 @@ class Room {
     this.everCleared = false;
     this._spawnCounter = 0;
     this.crack = null;               // 隐藏房裂缝（父房间才有）
+    this.hazards = [];               // 环境障碍（由 HazardField 托管）
 
     this._buildWalls();
     this._buildFloor();
     this._planWaves();
     this._spawnProps();
+    this._spawnHazards();
     this._startWave();
   }
 
@@ -138,10 +144,11 @@ class Room {
     c.width = VIEW_W;
     c.height = VIEW_H;
     const g = c.getContext('2d');
+    const pal = this.chapter.pal;
 
-    g.fillStyle = '#05070c';
+    g.fillStyle = pal.void;
     g.fillRect(0, 0, VIEW_W, VIEW_H);
-    g.fillStyle = '#0e151d';
+    g.fillStyle = pal.floor;
     g.fillRect(ARENA.x, ARENA.y, ARENA.w, ARENA.h);
 
     const ts = 64;
@@ -152,23 +159,25 @@ class Room {
 
     const sd = hashSeed(this.roomSeed || (this.type + ':' + this.index));
     const seedX = (sd % 97) * 0.37, seedY = (sd % 61) * 0.91;
+    const tr = pal.tile[0], tg = pal.tile[1], tb = pal.tile[2];
+    const tv = pal.tileVar;
     for (let ty = 0; ty * ts < ARENA.h + ts; ty++) {
       for (let tx = 0; tx * ts < ARENA.w + ts; tx++) {
         const n = hash2(tx + seedX, ty + seedY);
         const x = ARENA.x + tx * ts;
         const y = ARENA.y + ty * ts;
-        const shade = 14 + Math.floor(n * 12);
-        g.fillStyle = `rgb(${shade}, ${shade + 6}, ${shade + 12})`;
+        const shade = Math.floor(n * tv);
+        g.fillStyle = `rgb(${tr + shade}, ${tg + shade}, ${tb + shade})`;
         g.fillRect(x + 1, y + 1, ts - 2, ts - 2);
         if (n > 0.82) {
-          g.strokeStyle = 'rgba(90,170,190,0.10)';
+          g.strokeStyle = pal.grout;
           g.lineWidth = 1.5;
           g.beginPath();
           g.moveTo(x + 12, y + ts - 14);
           g.lineTo(x + ts - 14, y + ts - 14);
           g.stroke();
         } else if (n < 0.14) {
-          g.fillStyle = 'rgba(120,200,220,0.06)';
+          g.fillStyle = pal.dot;
           g.beginPath();
           g.arc(x + ts * 0.5, y + ts * 0.5, 4, 0, TAU);
           g.fill();
@@ -177,13 +186,26 @@ class Room {
     }
     g.restore();
 
-    /* 房间类型决定中央符环颜色 */
+    /* 房间类型决定中央符环颜色（章节决定基础色调） */
     const accent = this.meta.color;
     const cx = VIEW_W / 2, cy = VIEW_H / 2;
     g.strokeStyle = accent;
     g.globalAlpha = 0.07;
     g.lineWidth = 3;
     g.beginPath(); g.arc(cx, cy, 168, 0, TAU); g.stroke();
+    /* 章节外环：每层一个专属印纹 */
+    g.strokeStyle = pal.accent;
+    g.globalAlpha = 0.09;
+    g.lineWidth = 2;
+    const marks = this.chapter.id * 3;
+    for (let i = 0; i < marks; i++) {
+      const a = (i / marks) * TAU;
+      g.beginPath();
+      g.arc(cx, cy, 196, a, a + 0.16);
+      g.stroke();
+    }
+    g.strokeStyle = accent;
+    g.globalAlpha = 0.07;
     g.lineWidth = 1.5;
     g.beginPath(); g.arc(cx, cy, 148, 0, TAU); g.stroke();
     g.lineWidth = 2;
@@ -217,17 +239,22 @@ class Room {
     if (!this.isCombatRoom) return;
 
     if (this.type === ROOM_TYPE.BOSS) {
-      this.waves = [['boss']];
-      this.themeCn = '守望者';
+      /* 每一层有自己的 Boss 池（互不重叠），第 5 层是最终 Boss */
+      const bossId = BossRoster.pick(this.depth + 1, rng.fork('boss'));
+      this.bossId = bossId;
+      const guard = (this.chapter.guard || []).slice();
+      this.waves = [[bossId].concat(guard)];
+      this.themeCn = BossRoster.nameOf(bossId);
       return;
     }
 
-    /* 编队生成：按房间类型 + 深度组合敌人，而不是把所有种类随机混在一起 */
+    /* 编队生成：按「章节 + 房间类型 + 深度」组合敌人，而不是把所有种类随机混在一起 */
     const res = SpawnDirector.build({
       type: this.type,
       depth: this.depth,
       isElite: this.type === ROOM_TYPE.ELITE,
-      rng: rng.fork('waves')
+      rng: rng.fork('waves'),
+      chapter: this.chapter
     });
     this.waves = res.waves;
     this.themeCn = res.theme || '';
@@ -290,6 +317,16 @@ class Room {
     }
   }
 
+  /* ---------------------------------------------------------
+     环境障碍（章节决定种类与数量，房间 Rng 决定位置）
+     只出现在战斗类房间；非战斗房间保持干净，方便交互
+     --------------------------------------------------------- */
+  _spawnHazards() {
+    this.chapterFx = new ChapterFx(this.chapter, this.rng.fork('fx'));
+    if (!this.isCombatRoom) return;
+    this.hazards = new HazardField(this);
+  }
+
   /* 墙面中心点（裂缝用） */
   _wallCenter(side) {
     const cx = VIEW_W / 2, cy = VIEW_H / 2;
@@ -326,12 +363,16 @@ class Room {
   _spawnEnemy(type) {
     /* 半径走注册表（新增敌人不用改这里） */
     const r = EnemyFactory.radiusOf(type);
-    const pt = type === 'boss'
+    const isBossType = EnemyFactory.defOf(type).cat === 'boss';
+    const pt = isBossType
       ? { x: ARENA.x + ARENA.w / 2, y: ARENA.y + 120 }
       : this._spawnPoint(r);
     /* 每只敌人派生独立 Rng → 敌人组成、出生点、行为都随种子复现 */
     const e = EnemyFactory.create(this.game, type, pt.x, pt.y, this.tier,
       this.rng.fork('enemy' + this._spawnCounter++));
+
+    /* 章节难度：HP / 攻击节奏 / 移速 / 弹幕复杂度 / 词缀渗透（Boss 吃半幅） */
+    e.applyChapterScale(this.chapter);
 
     /* 精英房：每只敌人带 1~2 个词缀（更硬 / 更疯 / 死亡特效） */
     if (this.type === ROOM_TYPE.ELITE) {
@@ -347,7 +388,8 @@ class Room {
 
     this.enemies.push(e);
     this.spawnFx = 0.3;
-    this.game.particles.ring(pt.x, pt.y, e.colors[1], type === 'boss' ? 26 : 12, type === 'boss' ? 260 : 150);
+    this.game.particles.ring(pt.x, pt.y, e.colors[1], isBossType ? 26 : 12, isBossType ? 260 : 150);
+    if (isBossType) this.bossRef = e;
     return e;
   }
 
@@ -356,6 +398,15 @@ class Room {
      --------------------------------------------------------- */
   update(dt) {
     if (this.spawnFx > 0) this.spawnFx -= dt;
+
+    /* 章节背景效果（纯表现） */
+    if (this.chapterFx) this.chapterFx.update(dt);
+
+    /* 环境障碍：更新 → 对玩家与敌人施加作用 */
+    if (this.hazards && this.hazards.update) {
+      this.hazards.update(dt);
+      this.hazards.affectAll(dt);
+    }
 
     /* 待生成队列 */
     if (this.pending.length) {
@@ -427,11 +478,19 @@ class Room {
     this.clearTime = 0;
     this.everCleared = true;
 
-    /* Boss 房通关 → 生成层间裂隙；精英房通关 → 掉落宝箱 + 金币堆 */
+    /* Boss 房通关 → 解除房间（开门）+ 层间裂隙 + 大量金币 + 一件强力遗物 */
     if (this.type === ROOM_TYPE.BOSS) {
-      this.props.push(new Portal(this.game, ARENA.x + ARENA.w / 2, ARENA.y + ARENA.h / 2));
-      this.props.push(new CoinPile(this.game, ARENA.x + ARENA.w / 2 + 130, ARENA.y + ARENA.h / 2,
-        60 + this.depth * 25));
+      const cx = ARENA.x + ARENA.w / 2, cy = ARENA.y + ARENA.h / 2;
+      const lastFloor = this.floor >= CHAPTER_COUNT;
+      this.props.push(new Portal(this.game, cx, cy + 40,
+        lastFloor ? '终结回廊 · 查看结算' : '进入第 ' + (this.floor + 1) + ' 层 · ' + ChapterOf(this.floor + 1).cn));
+      const cm = this.chapter.coins || 1;
+      this.props.push(new CoinPile(this.game, cx + 210, cy, Math.round((120 + this.depth * 45) * cm)));
+      this.props.push(new CoinPile(this.game, cx - 210, cy, Math.round((90 + this.depth * 35) * cm)));
+      this.props.push(new BossRelic(this.game, cx - 120, cy - 60, this.rng.fork('bossRelic')));
+      if (this.depth >= 2) {
+        this.props.push(new BossRelic(this.game, cx + 120, cy - 60, this.rng.fork('bossRelic2')));
+      }
     } else if (this.type === ROOM_TYPE.ELITE) {
       this.props.push(new Chest(this.game, ARENA.x + ARENA.w / 2 - 60, ARENA.y + ARENA.h / 2,
         this.rng.fork('eliteChest'), false));
@@ -446,7 +505,21 @@ class Room {
      --------------------------------------------------------- */
   clampEntity(e, allowDoors) {
     const walls = (allowDoors && this.doorsOpen) ? this.wallsOpen : this.wallsClosed;
-    return Collision.resolveAll(e, walls);
+    const hit = Collision.resolveAll(e, walls);
+    /* 环境障碍：实体化的柱子 / 齿轮 / 相位柱也会挡住去路 */
+    if (this.hazards && this.hazards.resolveEntity) this.hazards.resolveEntity(e);
+    return hit;
+  }
+
+  /* 子弹是否撞上环境障碍（返回该障碍） */
+  hazardAt(x, y, r) {
+    if (this.hazards && this.hazards.hitTest) return this.hazards.hitTest(x, y, r);
+    return null;
+  }
+
+  /* 子弹在障碍表面反弹 */
+  bounceOffHazard(p, h) {
+    if (this.hazards && this.hazards.bounce) this.hazards.bounce(p, h);
   }
 
   hitsWall(x, y, r) {
@@ -499,6 +572,9 @@ class Room {
      --------------------------------------------------------- */
   drawFloor(ctx) {
     ctx.drawImage(this.floorCanvas, 0, 0);
+    /* 章节背景（环境粒子）→ 地面预警层 */
+    if (this.chapterFx) this.chapterFx.drawUnder(ctx);
+    if (this.hazards && this.hazards.drawUnder) this.hazards.drawUnder(ctx);
     if (this.state === 'clear') {
       const t = this.clearTime;
       const a = 0.10 + 0.05 * Math.sin(t * 3);
@@ -513,6 +589,12 @@ class Room {
 
   drawProps(ctx) {
     for (const pr of this.props) pr.draw(ctx);
+  }
+
+  /* 实体之上的一层：柱体 / 电弧塔 / 章节氛围 */
+  drawOverLayer(ctx) {
+    if (this.hazards && this.hazards.drawOver) this.hazards.drawOver(ctx);
+    if (this.chapterFx) this.chapterFx.drawOver(ctx);
   }
 
   drawWalls(ctx) {
@@ -567,11 +649,12 @@ class Room {
       }
     }
 
+    const pal = this.chapter.pal;
     for (const w of walls) {
-      ctx.fillStyle = '#171d29';
+      ctx.fillStyle = pal.wall;
       ctx.fillRect(w.x, w.y, w.w, w.h);
 
-      ctx.fillStyle = '#2b3547';
+      ctx.fillStyle = pal.wallEdge;
       if (w.inner === 'bottom') ctx.fillRect(w.x, w.y + w.h - 5, w.w, 5);
       else if (w.inner === 'top') ctx.fillRect(w.x, w.y, w.w, 5);
       else if (w.inner === 'right') ctx.fillRect(w.x + w.w - 5, w.y, 5, w.h);

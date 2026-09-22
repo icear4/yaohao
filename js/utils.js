@@ -38,6 +38,16 @@ function dist2(ax, ay, bx, by) {
 }
 function angleTo(ax, ay, bx, by) { return Math.atan2(by - ay, bx - ax); }
 
+/* 点到线段的最短距离（激光 / 冲刺轨迹的命中判定） */
+function pointSegDist(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  if (len2 <= 0.0001) return dist(px, py, x1, y1);
+  let t = ((px - x1) * dx + (py - y1) * dy) / len2;
+  t = t < 0 ? 0 : (t > 1 ? 1 : t);
+  return dist(px, py, x1 + dx * t, y1 + dy * t);
+}
+
 /* 最短弧的角度差（b - a），范围 -PI..PI */
 function angleDelta(a, b) {
   return ((b - a + Math.PI) % TAU + TAU) % TAU - Math.PI;
