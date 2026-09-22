@@ -172,7 +172,7 @@ const CHAPTERS = [
       special: 0.40, bullet: 2, spread: 1, affix: 0.22, budget: 9, max: 1
     },
     scale: { hp: 1.44, rate: 1.48, speed: 1.14 },
-    bosses: ['boss_prism', 'boss_dune', 'boss_volt'],
+    bosses: ['boss_prism', 'boss_dune', 'boss_volt', 'boss_kaleido'],
     guard: ['charger', 'shooter', 'wisp'],
     coins: 1.5
   },
@@ -211,7 +211,7 @@ const CHAPTERS = [
       special: 0.52, bullet: 2, spread: 2, affix: 0.32, budget: 12, max: 2
     },
     scale: { hp: 1.60, rate: 1.64, speed: 1.18 },
-    bosses: ['boss_collapse'],
+    bosses: ['boss_collapse', 'boss_nameless'],
     guard: ['charger', 'shooter', 'aegis'],
     coins: 1.8,
     final: true

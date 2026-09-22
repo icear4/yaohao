@@ -2737,7 +2737,9 @@ const BossRoster = {
     if (typeof CHAPTERS !== 'undefined') {
       const ch = ChapterOf(floor);
       if (ch && ch.bosses && ch.bosses.length) {
-        const use = ch.bosses.filter(id => this.list.some(b => b.id === id));
+        /* 只保留「已解锁」的 Boss（Meta 解锁后才会加入该层随机池） */
+        let use = ch.bosses.filter(id => this.list.some(b => b.id === id));
+        use = Meta.availableBosses(use);
         if (use.length) {
           const id = r.pick(use);
           this.lastId = id;

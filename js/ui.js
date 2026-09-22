@@ -22,13 +22,99 @@ class UI {
     this.elHint = document.getElementById('ov-hint');
     this.elSeed = document.getElementById('seed-input');
     this.elShakeBtn = document.getElementById('shake-btn');
+    this.elActions = document.getElementById('ov-actions');
+    this.elPanel = (document.querySelector ? document.querySelector('.panel') : null);
     this.refreshShakeBtn();
 
     this.elBtn.addEventListener('click', () => {
       this.game.primaryAction();
     });
 
+    /* 面板内的动态按钮（角色 / 统计 / 图鉴 / 返回 / 重置存档） */
+    if (this.elActions) {
+      this.elActions.addEventListener('click', (ev) => {
+        const t = ev.target;
+        if (!t || !t.getAttribute) return;
+        const act = t.getAttribute('data-act');
+        if (act === 'chars') this.setOverlay('chars');
+        else if (act === 'stats') this.setOverlay('stats');
+        else if (act === 'codex') this.setOverlay('codex');
+        else if (act === 'back') this.setOverlay('title');
+        else if (act === 'reset') { this._askReset(t); }
+        else if (act === 'reset-yes') { if (typeof Meta !== 'undefined') Meta.reset(); this.setOverlay('stats'); }
+        else if (act === 'reset-no') { this.setOverlay('stats'); }
+        if (t.blur) t.blur();
+      });
+    }
+
+    /* 角色卡片 / 存档确认：统一走一次事件委托 */
+    if (this.elText) {
+      this.elText.addEventListener('click', (ev) => {
+        const t = ev.target;
+        if (!t) return;
+        const act = this._attrUpTo(t, 'data-act', this.elText);
+        if (act === 'reset-yes') {
+          if (typeof Meta !== 'undefined') Meta.reset();
+          this.setOverlay('stats');
+          return;
+        }
+        if (act === 'reset-no') { this.setOverlay('stats'); return; }
+        const id = this._attrUpTo(t, 'data-char', this.elText);
+        if (!id) return;
+        if (typeof Meta === 'undefined' || !Meta.isCharUnlocked(id)) return;
+        Meta.selectChar(id);
+        this.game.charId = id;
+        if (this.game.player) {
+          this.game.player.char = CharacterOf(id);
+          if (this.game.player.build) this.game.player.build.recompute();
+        }
+        this.setOverlay('chars');
+      });
+    }
+
     this.setOverlay('title');
+  }
+
+  /* 遮罩底部按钮组（按当前面板动态生成） */
+  renderActions() {
+    if (!this.elActions) return;
+    const m = this.overlayMode;
+    let html = '';
+    if (m === 'title') {
+      html =
+        '<button type="button" data-act="chars">角色</button>' +
+        '<button type="button" data-act="stats">统计</button>' +
+        '<button type="button" data-act="codex">解锁图鉴</button>';
+    } else if (m === 'chars' || m === 'stats' || m === 'codex') {
+      html = '<button type="button" data-act="back">返回</button>';
+      if (m === 'stats') html += '<button type="button" data-act="reset" class="danger">清空存档</button>';
+    }
+    this.elActions.innerHTML = html;
+    this.elActions.style.display = html ? '' : 'none';
+  }
+
+  _askReset() {
+    this.elText.innerHTML =
+      '<div class="warn-box">确定清空全部 Meta 存档？<br>' +
+      '<span style="opacity:.7">解锁内容、统计、设置都会归零，且无法恢复。</span></div>' +
+      '<div class="row-btns">' +
+      '<button type="button" class="cc-btn danger" data-act="reset-yes">确认清空</button>' +
+      '<button type="button" class="cc-btn" data-act="reset-no">取消</button></div>';
+  }
+
+  /* 从点击目标向上找某个属性（DOM 里的卡片 / 按钮嵌套层级不定） */
+  _attrUpTo(node, attr, root) {
+    let n = node;
+    let guard = 0;
+    while (n && guard++ < 12) {
+      if (n.getAttribute) {
+        const v = n.getAttribute(attr);
+        if (v) return v;
+      }
+      if (n === root) break;
+      n = n.parentNode;
+    }
+    return null;
   }
 
   /* HUD 上的「抖动强度」按钮文案 */
@@ -55,6 +141,13 @@ class UI {
      --------------------------------------------------------- */
   setOverlay(mode) {
     this.overlayMode = mode;
+    this.renderActions();
+    /* 角色 / 统计 / 图鉴页面需要更宽的面板 */
+    if (this.elPanel && this.elPanel.classList) {
+      const wide = (mode === 'chars' || mode === 'stats' || mode === 'codex');
+      if (wide) this.elPanel.classList.add('wide');
+      else this.elPanel.classList.remove('wide');
+    }
     if (!mode) {
       this.overlay.classList.add('hidden');
       return;
@@ -69,9 +162,10 @@ class UI {
       this.elText.innerHTML =
         '星脉崩解之后，回廊在裂隙中生长。<br>' +
         '徘徊其中的，是回声凝成的残形。<br><br>' +
-        '你是最后的拾火者。穿过 <b>五层回廊</b>，击败每一层的守望者，<br>' +
+        '你是拾火者。穿过 <b>五层回廊</b>，击败每一层的守望者，<br>' +
         '直到星界核心停止搏动。<br><br>' +
-        '<span style="color:#8fa3b5">废弃庭院 → 机械矿井 → 腐化森林 → 虚空遗迹 → 星界核心</span>';
+        '<span style="color:#8fa3b5">废弃庭院 → 机械矿井 → 腐化森林 → 虚空遗迹 → 星界核心</span><br>' +
+        '<span style="color:#6b7c8c;font-size:12px">局外成长只解锁「新的可能性」，不会让你变得更强 —— 每一局的强度仍然只来自随机到的 Build</span>';
       this.elBtn.textContent = '开始探索';
       const kbHint = 'WASD 移动 · 鼠标瞄准 · 左键射击 · E 交互 · ESC 暂停 · F 全屏';
       this.elHint.textContent = (this.game.touchMode && this.touchHint) ? this.touchHint : kbHint;
@@ -119,7 +213,120 @@ class UI {
       this.elBtn.textContent = '重新开始';
       this.elHint.textContent = '按 R 也可以重来（可先改 Seed）';
       if (this.elSeed) this.elSeed.style.display = '';
+    } else if (mode === 'chars') {
+      this.elKicker.textContent = 'CHOOSE YOUR EMBER';
+      this.elTitleCn.textContent = '角色';
+      this.elTitleEn.textContent = 'CHARACTERS';
+      this.elText.innerHTML = this.charSelectHtml();
+      this.elBtn.textContent = '开始探索';
+      this.elHint.textContent = '角色只是不同起手式，没有强弱之分 · 解锁条件见「解锁图鉴」';
+      if (this.elSeed) this.elSeed.style.display = '';
+    } else if (mode === 'stats') {
+      this.elKicker.textContent = 'LIFETIME RECORDS';
+      this.elTitleCn.textContent = '统计';
+      this.elTitleEn.textContent = 'STATISTICS';
+      this.elText.innerHTML = this.statsHtml();
+      this.elBtn.textContent = '返回标题';
+      this.elHint.textContent = '数据保存在本机 localStorage · 不会上传';
+      if (this.elSeed) this.elSeed.style.display = 'none';
+    } else if (mode === 'codex') {
+      this.elKicker.textContent = 'UNLOCK CODEX';
+      this.elTitleCn.textContent = '解锁图鉴';
+      this.elTitleEn.textContent = 'CODEX';
+      this.elText.innerHTML = this.codexHtml();
+      this.elBtn.textContent = '返回标题';
+      this.elHint.textContent = '解锁只拓宽随机池，不给任何局外数值加成';
+      if (this.elSeed) this.elSeed.style.display = 'none';
     }
+  }
+
+  /* ---------------- 角色选择页 ---------------- */
+  charSelectHtml() {
+    const cur = (typeof Meta !== 'undefined') ? Meta.selectedChar() : 'ember';
+    const out = [];
+    for (const c of CHARACTERS) {
+      const ok = (typeof Meta === 'undefined') ? !c.locked : Meta.isCharUnlocked(c.id);
+      const sel = (c.id === cur);
+      const b = c.base;
+      out.push(
+        '<div class="char-card' + (sel ? ' sel' : '') + (ok ? '' : ' locked') + '"' +
+        (ok ? ' data-char="' + c.id + '"' : '') + '>' +
+        '<div class="cc-head"><span class="cc-name">' + c.name + '</span>' +
+        '<span class="cc-en">' + c.en + '</span>' +
+        (sel ? '<span class="cc-badge">使用中</span>' : (ok ? '' : '<span class="cc-badge lock">未解锁</span>')) +
+        '</div>' +
+        '<div class="cc-tag">' + c.tag + '</div>' +
+        '<div class="cc-desc">' + (ok ? c.desc : '???') + '</div>' +
+        '<div class="cc-abil"><b>能力</b>　' + (ok ? c.ability : '???') + '</div>' +
+        '<div class="cc-stats">' +
+        (ok
+          ? ('生命 <b>' + b.maxHp + '</b>　攻击 <b>' + b.damage + '</b>　射速 <b>' +
+            (1 / b.fireInterval).toFixed(1) + '/s</b>　移速 <b>' + b.moveSpeed + '</b>')
+          : ('生命 <b>?</b>　攻击 <b>?</b>　射速 <b>?</b>　移速 <b>?</b>')) +
+        '</div>' +
+        (ok ? '' : '<div class="cc-cond">解锁条件 · ' + this.unlockCondOf('char', c.id) + '</div>') +
+        '</div>'
+      );
+    }
+    return '<div class="char-grid">' + out.join('') + '</div>';
+  }
+
+  unlockCondOf(kind, id) {
+    const u = (typeof UNLOCK_BY !== 'undefined') ? UNLOCK_BY[kind + ':' + id] : null;
+    return u ? u.cond : '—';
+  }
+
+  /* ---------------- 统计页 ---------------- */
+  statsHtml() {
+    const s = (typeof Meta !== 'undefined') ? Meta.stats : null;
+    if (!s) return '<div class="warn-box">统计不可用</div>';
+    const row = (k, v) => '<div class="stat"><span>' + k + '</span><b>' + v + '</b></div>';
+    const beaten = (typeof Meta !== 'undefined') ? Meta.beatenBosses() : [];
+    const beatenNames = beaten.map(id => BossRoster.nameOf(id));
+    return '<div class="stat-grid">' +
+      row('游戏次数', s.runs) +
+      row('死亡次数', s.deaths) +
+      row('通关次数', s.wins) +
+      row('Boss 击杀', s.bossKills) +
+      row('总击杀', s.kills) +
+      row('累计金币', s.coins) +
+      row('最远层数', '第 ' + s.bestFloor + ' 层') +
+      row('最长生存', this.fmtTime(s.bestTime)) +
+      row('累计游玩', this.fmtTime(s.time)) +
+      row('已击败首领', (typeof Meta !== 'undefined') ? (Meta.data.beaten.length + ' / ' + BossRoster.list.length) : '—') +
+      '</div>' +
+      '<div class="codex-note">' +
+      (beatenNames.length ? ('击败过的首领：<b>' + beatenNames.join('、') + '</b>') : '尚未击败任何首领') +
+      '</div>';
+  }
+
+  /* ---------------- 解锁图鉴 ---------------- */
+  codexHtml() {
+    if (typeof Meta === 'undefined') return '<div class="warn-box">不可用</div>';
+    const KIND = { char: '角色', item: '道具', event: '房间事件', boss: '首领' };
+    const groups = {};
+    for (const c of Meta.codex()) {
+      (groups[c.kind] = groups[c.kind] || []).push(c);
+    }
+    const out = [];
+    for (const k of ['char', 'item', 'event', 'boss']) {
+      const list = groups[k];
+      if (!list || !list.length) continue;
+      const got = list.filter(c => c.got).length;
+      out.push('<div class="cdx-group"><div class="cdx-title">' + KIND[k] +
+        '　<span>' + got + ' / ' + list.length + '</span></div>');
+      for (const c of list) {
+        const pct = Math.round(clamp(c.cur / Math.max(1, c.need), 0, 1) * 100);
+        out.push('<div class="cdx-row' + (c.got ? ' got' : '') + '">' +
+          '<span class="cdx-name">' + (c.got ? c.name : '???') + '</span>' +
+          '<span class="cdx-cond">' + c.cond + '</span>' +
+          '<span class="cdx-bar"><i style="width:' + (c.got ? 100 : pct) + '%"></i></span>' +
+          '<span class="cdx-pct">' + (c.got ? '已解锁' : pct + '%') + '</span>' +
+          '</div>');
+      }
+      out.push('</div>');
+    }
+    return out.join('');
   }
 
   /* 读取玩家输入的 Seed（空则随机） */
@@ -211,7 +418,7 @@ class UI {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = '#7fd7ea';
-    ctx.fillText('拾火者 · EMBER', bx, by - 7);
+    ctx.fillText((p.char ? p.char.name + ' · ' + p.char.en : '拾火者 · EMBER'), bx, by - 7);
 
     ctx.fillStyle = '#2a1218';
     roundRectPath(ctx, bx, by, bw, bh, 5);

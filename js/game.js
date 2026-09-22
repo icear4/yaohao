@@ -46,6 +46,11 @@ class Game {
     this.floor = 1;
     this.embers = 0;
     this.ownedItems = [];
+    this.runTime = 0;
+    this.bossDefeated = [];
+
+    /* 当前选择的角色（来自 Meta 存档的设置项） */
+    this.charId = (typeof Meta !== 'undefined') ? Meta.selectedChar() : null;
 
     this.fps = 60;
     this._fpsAcc = 0;
@@ -169,6 +174,9 @@ class Game {
      流程控制
      --------------------------------------------------------- */
   startRun(seedStr) {
+    /* 每次开局都重新读一次角色设置（可能在角色页刚换过） */
+    this.charId = (typeof Meta !== 'undefined') ? Meta.selectedChar() : null;
+    if (typeof Meta !== 'undefined') Meta.beginRun();
     this.seed = (seedStr && String(seedStr).trim().length)
       ? String(seedStr).trim().toUpperCase()
       : randomSeedString();
@@ -189,7 +197,8 @@ class Game {
     this.nearProp = null;
     this.roomCache = {};
 
-    this.player = new Player(this, VIEW_W / 2, VIEW_H / 2 + 90);
+    /* 每次都是全新的角色实例 → Build 一律重新随机，绝不继承上一局 */
+    this.player = new Player(this, VIEW_W / 2, VIEW_H / 2 + 90, this.charId);
     this.map = new GameMap(this.seed, this.floor);
     this.state = 'playing';
     this.ui.setOverlay(null);
@@ -198,11 +207,24 @@ class Game {
     this.map.current = this.map.start;
     this.map.visit(this.map.start);
     this._placePlayerAtEntry('bottom');
+    if (this.player.onFloorStart) this.player.onFloorStart();
 
     const ch1 = ChapterOf(1);
+    const who = this.player.char ? this.player.char.name : '拾火者';
     this.ui.showBanner('第 1 层 · ' + ch1.cn,
-      ch1.sub, 4.0);
+      ch1.sub + '　·　' + who + ' 踏入回廊', 4.0);
     this.ui.showHint(ch1.tip, 6);
+  }
+
+  /* 解锁播报：把 Meta.checkUnlocks() 的返回逐条提示出来 */
+  _flushUnlocks(list) {
+    if (!list || !list.length) return;
+    const KIND_CN = { char: '新角色', item: '新道具', event: '新事件', boss: '新首领' };
+    for (const u of list) {
+      this.ui.showBanner('解锁 · ' + (KIND_CN[u.kind] || '新内容') + '　' + u.name,
+        u.cond + '　（已加入随机池）', 3.2);
+    }
+    this.particles.ring(VIEW_W / 2, VIEW_H / 2, '#ffd35e', 26, 260);
   }
 
   /* ---------------------------------------------------------
@@ -214,6 +236,12 @@ class Game {
     this.transition = null;
     this.projectiles.length = 0;
     this.addShake(8);
+    if (typeof Meta !== 'undefined') {
+      this._flushUnlocks(Meta.endRun({
+        victory: true, floor: this.floor, time: this.runTime, coins: this.embers
+      }));
+      Meta.addPlayTime(this.runTime);
+    }
     this.particles.burst(VIEW_W / 2, VIEW_H / 2, 60, {
       speed: 320, life: 1.4, size: 6,
       colors: ['#8fe9ff', '#ffffff', '#ffd35e', '#c08bff']
@@ -237,6 +265,9 @@ class Game {
   }
 
   primaryAction() {
+    const om = this.ui ? this.ui.overlayMode : null;
+    if (om === 'chars') { this.startRun(this.ui.readSeedInput()); return; }
+    if (om === 'stats' || om === 'codex') { this.ui.setOverlay('title'); return; }
     if (this.state === 'title' || this.state === 'gameover' || this.state === 'victory') {
       this.startRun(this.ui.readSeedInput());
     } else if (this.state === 'paused') this.resume();
@@ -253,6 +284,8 @@ class Game {
   addCoins(n, x, y) {
     n = Math.round(n);
     if (n <= 0) return 0;
+    /* 角色金币倍率（拾荒者） */
+    if (this.player && this.player.coinMul) n = Math.round(n * this.player.coinMul);
     this.embers += n;
     if (x !== undefined) {
       this.damageNumbers.add(x, y - 14, '◈' + n, { color: '#ffd35e', life: 0.9, vy: -46 });
@@ -303,6 +336,12 @@ class Game {
   onPlayerDeath() {
     this.state = 'gameover';
     this.addShake(9);
+    if (typeof Meta !== 'undefined') {
+      this._flushUnlocks(Meta.endRun({
+        victory: false, floor: this.floor, time: this.runTime, coins: this.embers
+      }));
+      Meta.addPlayTime(this.runTime);
+    }
     this.particles.burst(this.player.x, this.player.y, 34, {
       speed: 260, life: 0.9, size: 5, colors: ['#ffb347', '#ff6b5c', '#ffffff', '#7fd7ea']
     });
@@ -311,6 +350,11 @@ class Game {
 
   onEnemyKilled(e) {
     this.kills++;
+    /* 角色击杀钩子（拾火者的余烬回燃等） */
+    if (this.player && this.player.onPlayerKill) this.player.onPlayerKill(e);
+    if (typeof Meta !== 'undefined') {
+      this._flushUnlocks(Meta.addKill(1, !!e.isBoss, e.isBoss ? (e.type || null) : null));
+    }
 
     /* 金币掉落：基础值 + 层数加成；精英房整体更高；「富饶」词缀 ×3 */
     let drop = 3 + Math.floor(this.floor * 0.8);
@@ -384,6 +428,8 @@ class Game {
     this.map.visit(this.map.start);
     this._placePlayerAtEntry('bottom');
     this.player.heal(20);
+    if (this.player.onFloorStart) this.player.onFloorStart();
+    if (typeof Meta !== 'undefined') this._flushUnlocks(Meta.reachFloor(this.floor));
 
     const ch = ChapterOf(this.floor);
     this.ui.showBanner('第 ' + this.floor + ' 层 · ' + ch.cn,
@@ -905,22 +951,24 @@ class Game {
   }
 
   _loadShakePref() {
-    try {
-      const v = (typeof localStorage !== 'undefined') ? localStorage.getItem('echoRiftShake') : null;
-      if (v !== null && v !== undefined) {
-        const n = parseInt(v, 10);
-        if (n >= 0 && n < this.shakeLevels.length) {
-          this.shakeLevel = n;
-          this.shakeScale = this.shakeLevels[n].scale;
-        }
-      }
-    } catch (e) { /* localStorage 不可用（隐私模式 / 无头环境）就用默认值 */ }
+    let raw = null;
+    /* 优先读 Meta 存档里的设置；没有则兼容旧的独立键（读一次后迁移进 Meta） */
+    if (typeof Meta !== 'undefined') raw = Meta.getSetting('shake', null);
+    if (raw === null || raw === undefined) {
+      try { if (typeof localStorage !== 'undefined') raw = localStorage.getItem('echoRiftShake'); }
+      catch (e) { raw = null; }
+    }
+    const n = parseInt(raw, 10);
+    if (!isNaN(n) && n >= 0 && n < this.shakeLevels.length) {
+      this.shakeLevel = n;
+      this.shakeScale = this.shakeLevels[n].scale;
+    }
+    if (typeof Meta !== 'undefined') Meta.setSetting('shake', this.shakeLevel);
   }
 
   _saveShakePref() {
-    try {
-      if (typeof localStorage !== 'undefined') localStorage.setItem('echoRiftShake', String(this.shakeLevel));
-    } catch (e) { /* 忽略 */ }
+    /* 统一写进 Meta 存档（含 localStorage 落盘） */
+    if (typeof Meta !== 'undefined') Meta.setSetting('shake', this.shakeLevel);
   }
 
   /* ---------------------------------------------------------
@@ -946,7 +994,13 @@ class Game {
     if (this.input.wasPressed('KeyF')) this.toggleFullscreen();
 
     if (this.state === 'title') {
-      if (this.input.wasPressed('Enter') || this.input.wasPressed('Space')) {
+      const om = this.ui ? this.ui.overlayMode : null;
+      if (om === 'stats' || om === 'codex') {
+        /* 子页面：Enter / ESC 返回标题 */
+        if (this.input.wasPressed('Enter') || this.input.wasPressed('Escape')) {
+          this.ui.setOverlay('title');
+        }
+      } else if (this.input.wasPressed('Enter') || this.input.wasPressed('Space')) {
         this.startRun(this.ui.readSeedInput());
       }
       this.input.endFrame();

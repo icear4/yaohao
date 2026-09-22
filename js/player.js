@@ -5,8 +5,14 @@
 'use strict';
 
 class Player {
-  constructor(game, x, y) {
+  constructor(game, x, y, charId) {
     this.game = game;
+
+    /* ---- 角色（Meta 系统：不同基础属性 + 特殊能力，见 meta.js） ----
+       未加载 meta.js 时为 null，一切走原来的默认数值（向后兼容） */
+    this.char = (typeof CHARACTERS !== 'undefined')
+      ? CharacterOf(charId || (game && game.charId)) : null;
+
     this.x = x;
     this.y = y;
     this.r = 15;
@@ -25,6 +31,10 @@ class Player {
       range: 1060,
       invulnTime: 0.9
     };
+    /* 角色覆盖：高攻必然低血、高血必然低攻（Meta 不给净增益） */
+    if (this.char && this.char.base) {
+      for (const k in this.char.base) this.base[k] = this.char.base[k];
+    }
 
     /* ---- 属性（由 Build.recompute() 每次重新写入） ---- */
     this.maxHp = this.base.maxHp;
@@ -48,6 +58,9 @@ class Player {
     /* ---- 临时增益 / 诅咒 ---- */
     this.buffs = new BuffSystem(this);
 
+    /* 角色自带机制（如星轨的回旋）要写进 Build，这里先算一次 */
+    this.build.recompute();
+
     /* ---- 运行时状态 ---- */
     this.fireTimer = 0;
     this.invuln = 0;
@@ -61,7 +74,45 @@ class Player {
     this.shotsFired = 0;
     this.trailT = 0;      // 烬迹计时
     this.slowT = 0;       // 被泥沼等减速的剩余时间
+
+    /* ---- 角色能力运行时状态（只有对应角色会用到） ---- */
+    this.heat = 0;        // 灼刃：过热层数
+    this.heatT = 0;       // 灼刃：停火倒计时
+    this.wallT = 0;       // 磐盾：护壁剩余时间
+    this.wallCd = 0;      // 磐盾：护壁冷却
+    this.autoT = 2.0;     // 星轨：自动星弹倒计时
   }
+
+  /* 取角色的能力钩子（没有就返回 null，走默认行为） */
+  _abil(name) {
+    if (!this.char) return null;
+    if (typeof CHAR_ABILITIES === 'undefined') return null;
+    const a = CHAR_ABILITIES[this.char.id];
+    return (a && a[name]) ? a[name] : null;
+  }
+
+  /* 角色配色（没有角色时用原来的兜帽配色） */
+  get skin() {
+    return (this.char && this.char.colors) || {
+      cloak: '#15333c', edge: '#2f6b74', core: '#ffb347',
+      accent: '#7fd7ea', bullet: '#ffb347'
+    };
+  }
+
+  /* 击杀回调（由 game.onEnemyKilled 调用） */
+  onPlayerKill(e) {
+    const f = this._abil('onKill');
+    if (f) f(this, this.game, e);
+  }
+
+  /* 进入新一层（含开局第 1 层）回调 */
+  onFloorStart() {
+    const f = this._abil('onFloor');
+    if (f) f(this, this.game);
+  }
+
+  /* 金币倍率（拾荒者） */
+  get coinMul() { return (this.char && this.char.coinMul) || 1; }
 
   /* 被减速（取最长持续时间，不叠加） */
   applySlow(dur) {
@@ -147,6 +198,10 @@ class Player {
       }
     }
 
+    /* 角色能力的每帧逻辑（过热衰减 / 护壁计时 / 自动星弹……） */
+    const ab = this._abil('update');
+    if (ab) ab(this, dt, this.game);
+
     /* 射击 */
     this.fireTimer -= dt;
     this.recoil = Math.max(0, this.recoil - dt * 9);
@@ -169,6 +224,9 @@ class Player {
   shoot() {
     const m = this.mods;
     const n = this.bulletCount;
+    /* 角色伤害倍率（灼刃的过热） */
+    const dm = this._abil('dmgMul');
+    const cmul = dm ? dm(this) : 1;
     const spreadTotal = n > 1 ? 0.11 * (n - 1) : 0;
     const start = this.aim - spreadTotal * 0.5;
     const muzzleLen = this.r + 8;
@@ -184,10 +242,10 @@ class Player {
         x: px, y: py,
         angle: a,
         speed: this.bulletSpeed,
-        damage: this.damage,
+        damage: this.damage * cmul,
         r: this.bulletRadius,
         friendly: true,
-        color: '#ffb347',
+        color: this.skin.bullet,
         core: '#fff6da',
         life: life,
         game: this.game,
@@ -210,10 +268,12 @@ class Player {
 
     this.shotsFired++;
     this.recoil = 1;
+    const os = this._abil('onShoot');
+    if (os) os(this, this.game);
     this.game.particles.muzzle(
       this.x + Math.cos(this.aim) * (this.r + 10),
       this.y + Math.sin(this.aim) * (this.r + 10),
-      this.aim, '#ffd27a'
+      this.aim, this.skin.bullet
     );
   }
 
@@ -223,11 +283,19 @@ class Player {
   takeDamage(amount, srcX, srcY) {
     if (this.dead || this.invuln > 0) return false;
 
+    /* 角色减伤（磐盾的回声护壁） */
+    const tm = this._abil('dmgTakenMul');
+    if (tm) amount *= tm(this);
+
     const real = Math.max(1, Math.round(amount - (this.armor || 0)));
     this.hp -= real;
     this.invuln = this.invulnTime;
     this.hurtFlash = 1;
     this.game.addShake(4.5);
+
+    /* 角色受伤钩子（护壁展开等） */
+    const oh = this._abil('onHurt');
+    if (oh) oh(this, this.game);
 
     const ang = angleTo(srcX, srcY, this.x, this.y);
     this.game.particles.burst(this.x, this.y, 12, {
@@ -271,9 +339,37 @@ class Player {
   draw(ctx) {
     if (this.dead) return;
     const blink = this.invuln > 0 && Math.floor(this.invuln * 16) % 2 === 0;
+    const C = this.skin;
+    const cid = this.char ? this.char.id : 'ember';
 
     ctx.save();
     ctx.translate(this.x, this.y);
+
+    /* 磐盾：护壁展开时脚下一圈绿环 */
+    if (this.wallT > 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.35 + 0.25 * Math.sin(this.game.time * 9);
+      ctx.strokeStyle = '#7dffb0';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, this.r * 1.75, 0, TAU);
+      ctx.stroke();
+      ctx.globalAlpha = 0.12;
+      ctx.fillStyle = '#7dffb0';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    /* 灼刃：过热越高，脚下火环越亮 */
+    if (this.heat > 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.10 + 0.05 * (this.heat / 10);
+      ctx.fillStyle = this.heat > 7 ? '#fff0c0' : '#ff6b3c';
+      ctx.beginPath();
+      ctx.arc(0, 0, this.r * (1.3 + 0.5 * (this.heat / 10)), 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
 
     /* 影子 */
     ctx.fillStyle = 'rgba(0,0,0,0.38)';
@@ -288,7 +384,7 @@ class Player {
       ctx.save();
       ctx.rotate(this.aim + Math.PI);
       ctx.globalAlpha = (blink ? 0.2 : 0.5) * (0.6 + 0.4 * Math.sin(this.walkPhase * 2));
-      ctx.fillStyle = '#4fd6ff';
+      ctx.fillStyle = C.accent;
       ctx.beginPath();
       ctx.moveTo(this.r * 0.8, 0);
       ctx.lineTo(this.r * 2.0, -this.r * 0.45);
@@ -309,23 +405,68 @@ class Player {
       const rr = this.r * (1.06 + (i % 2 === 0 ? 0.05 : -0.03)) + wob * Math.cos(a);
       pts.push([Math.cos(a) * rr, Math.sin(a) * rr]);
     }
-    ctx.fillStyle = '#15333c';
+    ctx.fillStyle = C.cloak;
     polygonPath(ctx, pts);
     ctx.fill();
-    ctx.strokeStyle = '#2f6b74';
+    ctx.strokeStyle = C.edge;
     ctx.lineWidth = 2;
     ctx.stroke();
 
     /* 肩部旋转环 */
     ctx.rotate(-this.aim);
-    ctx.strokeStyle = 'rgba(120, 230, 250, 0.55)';
-    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = C.accent;
+    ctx.globalAlpha = 0.55;
     ctx.beginPath();
     ctx.arc(0, 0, this.r * 1.28, this.game.time * 1.4, this.game.time * 1.4 + Math.PI * 1.15);
     ctx.stroke();
     ctx.beginPath();
     ctx.arc(0, 0, this.r * 1.28, this.game.time * 1.4 + Math.PI, this.game.time * 1.4 + Math.PI * 1.75);
     ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    /* 角色标识（一眼分辨是谁） */
+    ctx.save();
+    ctx.rotate(this.game.time * 0.8);
+    if (cid === 'cinder') {
+      /* 灼刃：背后两片火羽 */
+      ctx.fillStyle = '#ff6b3c';
+      for (let s = -1; s <= 1; s += 2) {
+        ctx.beginPath();
+        ctx.moveTo(0, this.r * 0.5);
+        ctx.lineTo(s * this.r * 1.0, this.r * 1.25);
+        ctx.lineTo(s * this.r * 0.35, this.r * 0.75);
+        ctx.closePath();
+        ctx.fill();
+      }
+    } else if (cid === 'bulwark') {
+      /* 磐盾：肩侧两块盾板 */
+      ctx.fillStyle = '#3f7ba8';
+      for (let s = -1; s <= 1; s += 2) {
+        ctx.beginPath();
+        ctx.arc(s * this.r * 0.95, 0, this.r * 0.42, 0, TAU);
+        ctx.fill();
+      }
+    } else if (cid === 'orbiter') {
+      /* 星轨：绕身的一颗星弹 */
+      const ra = this.game.time * 2.4;
+      ctx.fillStyle = '#d8b4ff';
+      ctx.beginPath();
+      ctx.arc(Math.cos(ra) * this.r * 1.45, Math.sin(ra) * this.r * 1.45, 3.4, 0, TAU);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(Math.cos(ra + Math.PI) * this.r * 1.45, Math.sin(ra + Math.PI) * this.r * 1.45, 3.4, 0, TAU);
+      ctx.fill();
+    } else if (cid === 'scav') {
+      /* 拾荒者：腰间晃动的钱袋微光 */
+      ctx.fillStyle = '#ffd35e';
+      ctx.beginPath();
+      ctx.arc(this.r * 0.9, this.r * 0.5, 2.6, 0, TAU);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(-this.r * 0.9, -this.r * 0.5, 2.6, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
 
     /* 射口（指向准星） */
     ctx.rotate(this.aim);
@@ -341,7 +482,7 @@ class Player {
     const pulse = 0.86 + 0.14 * Math.sin(this.game.time * 4.2);
     const g = ctx.createRadialGradient(0, 0, 0.5, 0, 0, this.r * 0.82 * pulse);
     g.addColorStop(0, '#fff4d2');
-    g.addColorStop(0.42, '#ffb347');
+    g.addColorStop(0.42, C.core);
     g.addColorStop(1, 'rgba(255,120,40,0.05)');
     ctx.fillStyle = g;
     ctx.beginPath();

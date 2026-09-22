@@ -258,8 +258,53 @@ const ITEMS = [
     id: 'crystal_resonance', name: '棱晶共鸣', cat: 'special', color: '#c08bff', max: 2,
     desc: '穿透 +1 层，链式跳跃 +1 次。',
     flags: { pierce: 1, chain: 1 }
+  },
+
+  /* =========================================================
+     可解锁道具（locked: true）
+     ---------------------------------------------------------
+     默认不在随机池里，达成 Meta 解锁条件后才加入。
+     解锁只是「把新牌放进牌堆」，不给任何局外数值加成。
+     新增一件 = 加一条数据 + 在 meta.js 的 UNLOCKS 里加一条条件
+     ========================================================= */
+  {
+    id: 'prism_heart', name: '棱镜之心', cat: 'attack', color: '#ff6bd0', max: 3, locked: true,
+    desc: '攻击力 +16%，暴击率 +7%。',
+    stats: { damagePct: 0.16, critChance: 0.07 }
+  },
+  {
+    id: 'void_shell', name: '虚空甲壳', cat: 'defense', color: '#7fe4ff', max: 3, locked: true,
+    desc: '最大生命 +40，并立即回复等量生命；受到伤害 -4。',
+    stats: { maxHp: 40, dr: 4 }
+  },
+  {
+    id: 'clockwork', name: '发条中枢', cat: 'proj', color: '#ffb35c', max: 3, locked: true,
+    desc: '攻击速度 +32%，弹速 +25%，弹径 +1。',
+    stats: { fireRate: 0.32, bulletSpeedPct: 0.25, bulletRadius: 1 }
+  },
+  {
+    id: 'rift_bloom', name: '裂隙之花', cat: 'special', color: '#9ad14f', max: 2, locked: true,
+    desc: '分裂 +1 层，链式跳跃 +1 次。',
+    flags: { split: 1, chain: 1 }
+  },
+  {
+    id: 'starlight', name: '星辉丝线', cat: 'special', color: '#aef0ff', max: 2, locked: true,
+    desc: '追踪 +1 层，回旋 +1 层。',
+    flags: { homing: 1, orbit: 1 }
+  },
+  {
+    id: 'ember_titan', name: '泰坦余烬', cat: 'attack', color: '#ff8a5c', max: 3, locked: true,
+    desc: '攻击力 +9，弹径 +2，击退 +1 层。',
+    stats: { damage: 9, bulletRadius: 2 }, flags: { knockback: 1 }
   }
 ];
+
+/* 该道具当前是否可以出现在随机池里（locked 道具需要 Meta 解锁） */
+function itemUnlocked(it) {
+  if (!it.locked) return true;
+  if (typeof Meta === 'undefined' || !Meta.isItemUnlocked) return false;
+  return Meta.isItemUnlocked(it.id);
+}
 
 const ITEM_BY_ID = {};
 for (const it of ITEMS) ITEM_BY_ID[it.id] = it;
@@ -443,6 +488,11 @@ class Build {
       for (const k in bf.mods) md[k] = (md[k] || 0) + bf.mods[k];
     }
 
+    /* 1c. 角色自带机制（和道具 / 增益完全叠加，见 meta.js CHARACTERS.mods） */
+    if (p.char && p.char.mods) {
+      for (const k in p.char.mods) md[k] = (md[k] || 0) + p.char.mods[k];
+    }
+
     /* 2. 最终属性（供组合条件判断） */
     const fin = {
       maxHp: Math.max(20, b.maxHp + st.maxHp),
@@ -528,8 +578,10 @@ function pickItem(rng, build, opt) {
   opt = opt || {};
   const owned = build || { count: () => 0 };
   let pool = ITEMS.filter(it => opt.always !== it.id ? true : true);
+  /* 未解锁的道具不在池里（Meta 解锁后自动加入，随机性不受影响） */
+  pool = pool.filter(itemUnlocked);
   pool = pool.filter(it => owned.count(it.id) < (it.max || 99));
-  if (!pool.length) pool = ITEMS.slice();
+  if (!pool.length) pool = ITEMS.filter(itemUnlocked);
 
   /* 前两件优先给「立刻有感」的输出/机制件 */
   if (opt.early && pool.length > 3) {
@@ -558,13 +610,13 @@ function pickItem(rng, build, opt) {
 function pickStrongItem(rng, build) {
   const owned = build || { count: () => 0 };
   const avail = it => owned.count(it.id) < (it.max || 99);
-  let pool = ITEMS.filter(it => avail(it) &&
+  let pool = ITEMS.filter(it => avail(it) && itemUnlocked(it) &&
     (it.cat === 'attack' || it.cat === 'proj' || it.cat === 'special'));
   if (pool.length > 2) {
     const rare = pool.filter(it => (it.max || 99) <= 3);
     if (rare.length) pool = rare;
   }
-  if (!pool.length) pool = ITEMS.filter(avail);
+  if (!pool.length) pool = ITEMS.filter(it => avail(it) && itemUnlocked(it));
   if (!pool.length) pool = ITEMS.slice();
   /* 偏向玩家已有方向，帮助成型（但仍受强力池限制） */
   if (rng.chance(0.4) && build && build.slots) {

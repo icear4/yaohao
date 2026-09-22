@@ -158,11 +158,60 @@ const EVENTS = [
       const names = [a && a.name, b && b.name].filter(Boolean).join('、');
       return { name: '守望者的暗库', desc: (names || '空库') + '，但残形被惊动了', color: '#ff4d6b' };
     }
+  },
+  {
+    id: 'echo_pact', name: '回声契约', color: '#7fe4ff', locked: true,
+    desc: '与回廊立约：最大生命 +18，攻击力 +4（永久），但每层开始会少 6 点生命',
+    can: () => true,
+    run(g) {
+      g.player.buffs.add({
+        id: 'echo_pact', name: '回声契约', kind: 'buff', color: '#7fe4ff', dur: 0,
+        stats: { maxHp: 18, damage: 4 }
+      });
+      g.player.takeDamage(6, g.player.x, g.player.y);
+      g.player.invuln = 0;
+      return { name: '回声契约', desc: '最大生命 +18 · 攻击力 +4 · 代价 -6 生命', color: '#7fe4ff' };
+    }
+  },
+  {
+    id: 'star_dais', name: '星界赌盘', color: '#c08bff', locked: true,
+    desc: '押上 40 金币：四成拿到 3 倍，六成只剩回声',
+    can: (g) => g.coins >= 40,
+    run(g, rng) {
+      g.spendCoins(40);
+      if (rng.chance(0.4)) {
+        g.addCoins(120);
+        return { name: '星界赌盘 · 赢', desc: '+120 金币', color: '#7dffb0' };
+      }
+      return { name: '星界赌盘 · 输', desc: '40 金币沉入星海', color: '#c08bff' };
+    }
+  },
+  {
+    id: 'relic_forge', name: '遗物熔炉', color: '#ff8a5c', locked: true,
+    desc: '花 45 金币，熔铸一件强力道具（从首领级池里抽）',
+    can: (g) => g.coins >= 45,
+    run(g, rng) {
+      g.spendCoins(45);
+      const it = pickStrongItem(rng, g.player.build);
+      const got = g.player.gainItem(it.id);
+      return {
+        name: got ? got.name : '熔炉空转',
+        desc: got ? got.desc : '没有可熔铸的道具',
+        color: got ? got.color : '#ff8a5c'
+      };
+    }
   }
 ];
 
+function eventUnlocked(e) {
+  if (!e.locked) return true;
+  if (typeof Meta === 'undefined' || !Meta.isEventUnlocked) return false;
+  return Meta.isEventUnlocked(e.id);
+}
+
 function pickEvent(rng, game) {
-  const pool = EVENTS.filter(e => !e.can || e.can(game));
+  let pool = EVENTS.filter(e => eventUnlocked(e) && (!e.can || e.can(game)));
+  if (!pool.length) pool = EVENTS.filter(e => !e.locked && (!e.can || e.can(game)));
   if (!pool.length) return EVENTS[0];
   return rng.pick(pool);
 }
